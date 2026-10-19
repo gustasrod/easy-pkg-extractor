@@ -12,8 +12,17 @@ import weakref
 from array import array
 from contextlib import contextmanager
 from functools import lru_cache
+from itertools import pairwise
 from pathlib import Path, PureWindowsPath
 import zlib
+
+
+_FROZEN = bool(getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"))
+_ORIGINAL_CWD = os.getcwd()
+if _FROZEN:
+    os.environ["TCL_LIBRARY"] = "_tcl_data"
+    os.environ["TK_LIBRARY"] = "_tk_data"
+    os.chdir(sys._MEIPASS)
 
 
 def _application_directory():
@@ -27,6 +36,9 @@ try:
     from tkinter import filedialog, messagebox, ttk
 except ImportError:
     tk = None
+finally:
+    if _FROZEN:
+        os.chdir(_ORIGINAL_CWD)
 
 try:
     from Crypto.Cipher import AES
@@ -105,7 +117,6 @@ def _rsa_decrypt(keyset, ciphertext, out_len=32):
     if c >= n:
         raise ValueError("bloco RSA fora do módulo")
     if "p" in keyset and "q" in keyset:
-        # A mesma operação RSA em duas partes menores (teorema chinês do resto).
         p, q = keyset["p"], keyset["q"]
         left = pow(c, d % (p - 1), p)
         right = pow(c, d % (q - 1), q)
@@ -135,8 +146,6 @@ def _gfmul(t_le):
 
 @lru_cache(maxsize=1)
 def _xts_mask_tables():
-    # A transformação é linear: 22 grupos de até 6 bits geram as 256
-    # máscaras do setor. Cerca de 5,6 MiB fixos, sem depender de aceleração da CPU.
     tables = []
     for shift in range(0, 128, 6):
         basis = []
@@ -277,6 +286,292 @@ def _pkg_sort_key(item):
     )
 
 
+def _package_display_key(item):
+    title_id, kind, version, filename = _pkg_sort_key(item)
+    return kind, version if item.get("kind") == "update" else (), title_id, version, filename
+
+
+LANGUAGE_TEXT = {
+    "pt": {
+        "title": "Easy PKG Extractor — Extrator e organizador de PKG",
+        "language_button": "🌐 English",
+        "add_files_frame": " 📂 Adicionar Arquivos .pkg ",
+        "hint": "👉 Arraste e solte seus arquivos .pkg aqui diretamente da sua pasta\n"
+                "O programa identifica Jogo Base, Atualização ou DLC e organiza os arquivos para facilitar o uso no Launcher.",
+        "scan_folder": "🔍 Buscar .pkg nesta pasta",
+        "add_files": "➕ Adicionar arquivos...",
+        "add_folder": "📁 Adicionar outra pasta...",
+        "clear_list": "🗑️ Limpar lista",
+        "detected_frame": " 📋 Arquivos Detectados e Analisados ",
+        "history_frame": " Histórico de Atividades ",
+        "column_type": "Tipo",
+        "column_title": "Título do Jogo",
+        "column_code": "Código",
+        "column_version": "Versão",
+        "column_size": "Tamanho",
+        "column_file": "Arquivo",
+        "column_status": "Status",
+        "destination": "Pasta de saída (será criada uma subpasta .NomeDoJogo):",
+        "choose_folder": "Escolher pasta...",
+        "selection_frame": " Quais pacotes extrair? ",
+        "all_packages": "Todos os pacotes da lista",
+        "selected_packages": "Somente os pacotes selecionados",
+        "selection_hint": "Selecione na lista acima. Vários: Ctrl + clique.",
+        "organization_frame": " Como organizar? ",
+        "merge_update": "Juntar jogo e atualização",
+        "merge_help": "Na mesma pasta. DLCs separados em addcont.",
+        "extract_here": "Extrair na pasta do programa",
+        "extract_here_help": "Ignora o destino acima e não cria subpasta do jogo.",
+        "after_frame": " Após a extração ",
+        "delete_pkg": "Apagar os .pkg após extrair com sucesso",
+        "delete_help": "Remove os originais. Desmarcado = manter.",
+        "extract": "🚀 Extrair e Organizar",
+        "extract_selected": "Extrair pacotes selecionados",
+        "cancel": "⏹ Cancelar",
+        "cpu": "CPU:",
+        "waiting": "Aguardando arquivos .pkg...",
+        "list_cleared": "Lista limpa. Arraste novos arquivos .pkg.",
+        "wait_current_operation": "Aguarde o fim da operação atual para adicionar arquivos.",
+        "scanning": "Buscando e analisando os pacotes...",
+        "searching_from": "Buscando arquivos .pkg em todas as pastas e subpastas a partir de: {path}...",
+        "queue_status": "{count} arquivo(s) na fila. Clique em 'Extrair e Organizar'.",
+        "no_packages": "Nenhum arquivo .pkg encontrado.",
+        "file_not_found": "arquivo não encontrado",
+        "choose_files_title": "Escolha um ou mais arquivos .pkg",
+        "pkg_files": "Arquivos .pkg de PS4",
+        "all_files": "Todos os arquivos",
+        "choose_folder_title": "Escolha uma pasta contendo arquivos .pkg",
+        "choose_output_title": "Escolha a pasta de destino",
+        "choose_package_title": "Escolha o pacote",
+        "choose_package_message": "Selecione os pacotes desejados na lista e depois clique em 'Extrair pacotes selecionados'.",
+        "error": "Erro",
+        "choose_output_message": "Escolha uma pasta de saída válida.",
+        "invalid_destination": "Destino inválido",
+        "different_games": "Jogos diferentes precisam de pastas separadas. Desmarque 'Extrair aqui'.",
+        "cancel_requested": "Cancelamento solicitado. Aguarde...",
+        "added": "Adicionado(s) {count} arquivo(s) .pkg para extração.",
+        "no_compatible": "Nenhum arquivo .pkg compatível encontrado nesta busca.",
+        "duplicate_warning": "Aviso: O arquivo '{filename}' já está na lista. Ignorando repetido.",
+        "read_pkg_error": "Não foi possível ler '{filename}': {error}",
+        "compare_pkg_error": "Não foi possível comparar '{filename}': {error}",
+        "duplicate_ignored": "Arquivo duplicado ignorado: '{filename}' é igual a '{other}'.",
+        "scan_cancelled": "Busca cancelada. Os pacotes já analisados foram mantidos.",
+        "scan_failed": "Não foi possível concluir a busca: {error}",
+        "analyze_failed": "Erro ao analisar os pacotes: {error}",
+        "no_extractable": "Nenhum pacote compatível para extrair.",
+        "ignored_official": "Ignorado (oficial)",
+        "official_warning": "Aviso: '{filename}' é um pacote oficial da Sony com criptografia de fábrica. Ignorado para não travar.",
+        "start_extraction": "Iniciando extração de {count} arquivo(s).",
+        "mode_here": "Modo: Extrair aqui (sem subpasta do jogo)",
+        "mode_subfolder": "Modo: Subpasta .NomeDoJogo pelo título do jogo base",
+        "destination_log": "Pasta de destino: {path}",
+        "missing_source": "Aviso: '{filename}' não está mais na pasta de origem. Ignorando este pacote.",
+        "base_missing": "Aviso: título do jogo base indisponível na lista; usando o código CUSA como pasta.",
+        "extraction_folder": "Pasta de extração: {path}",
+        "package_changed": "o pacote foi alterado desde que entrou na lista; remova e adicione o arquivo novamente",
+        "completed_log": "✓ Concluído com sucesso em: {path}",
+        "file_deleted": "Arquivo .pkg apagado com sucesso: {filename}",
+        "file_delete_failed": "Aviso: Não foi possível apagar '{filename}': {error}",
+        "none_available_log": "Nenhum pacote disponível para extrair. Adicione os arquivos novamente.",
+        "cancel_log": "\n⏹ Processo cancelado pelo usuário.",
+        "error_log": "\n❌ ERRO durante a extração: {error}",
+        "extract_error_title": "Erro na Extração",
+        "extract_error_message": "Ocorreu um erro:\n{error}",
+        "preparing": "[{index}/{total}] Preparando: {filename}...",
+        "extracting": "[{index}/{total}] Extraindo: {filename} (0.0%)",
+        "progress": "[{index}/{total}] {filename}: {percent:.1f}% ({done:.1f} MB de {total_mb:.1f} MB)",
+        "completed_file": "[{index}/{total}] Concluído: {filename}",
+        "success": "Extração concluída com sucesso!",
+        "partial_success": "Extração finalizada: {completed}/{total} pacotes extraídos. Confira os avisos no histórico.",
+        "selected_success_log": "\nPacotes selecionados extraídos com sucesso.",
+        "all_success_log": "\nTodos os arquivos foram extraídos e organizados.",
+        "launcher_help": "Os arquivos foram extraídos e organizados para facilitar o uso no Launcher.",
+        "selected_success": "Os pacotes selecionados foram extraídos por completo.",
+        "all_success": "Extração e organização concluídas com sucesso!\n\nOs arquivos foram extraídos e organizados para facilitar o uso no Launcher.",
+        "cancelled": "Extração cancelada.",
+        "missing_file": "Arquivo ausente",
+        "extracting_status": "Extraindo...",
+        "completed_status": "Concluído",
+        "cancelled_status": "Cancelado",
+        "error_status": "Erro",
+        "ready_status": "Pronto para extrair",
+        "official_status": "Criptografia oficial",
+        "base_type": "Jogo Base",
+        "update_type": "Atualização",
+        "dlc_type": "DLC / Extra",
+        "other_type": "Outro pacote",
+    },
+    "en": {
+        "title": "Easy PKG Extractor — PKG extractor and organizer",
+        "language_button": "🌐 Português",
+        "add_files_frame": " 📂 Add .pkg Files ",
+        "hint": "👉 Drag and drop your .pkg files here directly from their folder\n"
+                "The program identifies Base Game, Update, or DLC and organizes the files for easy Launcher use.",
+        "scan_folder": "🔍 Search .pkg in this folder",
+        "add_files": "➕ Add files...",
+        "add_folder": "📁 Add another folder...",
+        "clear_list": "🗑️ Clear list",
+        "detected_frame": " 📋 Detected and Analyzed Files ",
+        "history_frame": " Activity History ",
+        "column_type": "Type",
+        "column_title": "Game Title",
+        "column_code": "Code",
+        "column_version": "Version",
+        "column_size": "Size",
+        "column_file": "File",
+        "column_status": "Status",
+        "destination": "Output folder (a .GameName subfolder will be created):",
+        "choose_folder": "Choose folder...",
+        "selection_frame": " Which packages to extract? ",
+        "all_packages": "All packages in the list",
+        "selected_packages": "Selected packages only",
+        "selection_hint": "Select packages above. Multiple: Ctrl + click.",
+        "organization_frame": " How to organize? ",
+        "merge_update": "Join game and update",
+        "merge_help": "Same folder. DLCs are separated into addcont.",
+        "extract_here": "Extract into the program folder",
+        "extract_here_help": "Ignores the output above and does not create a game subfolder.",
+        "after_frame": " After extraction ",
+        "delete_pkg": "Delete .pkg files after successful extraction",
+        "delete_help": "Removes the originals. Unchecked = keep.",
+        "extract": "🚀 Extract and Organize",
+        "extract_selected": "Extract selected packages",
+        "cancel": "⏹ Cancel",
+        "cpu": "CPU:",
+        "waiting": "Waiting for .pkg files...",
+        "list_cleared": "List cleared. Drag new .pkg files here.",
+        "wait_current_operation": "Wait for the current operation to finish before adding files.",
+        "scanning": "Searching and analyzing packages...",
+        "searching_from": "Searching for .pkg files in all folders and subfolders from: {path}...",
+        "queue_status": "{count} package(s) queued. Click 'Extract and Organize'.",
+        "no_packages": "No .pkg files found.",
+        "file_not_found": "file not found",
+        "choose_files_title": "Choose one or more .pkg files",
+        "pkg_files": "PS4 .pkg files",
+        "all_files": "All files",
+        "choose_folder_title": "Choose a folder containing .pkg files",
+        "choose_output_title": "Choose the output folder",
+        "choose_package_title": "Choose the package",
+        "choose_package_message": "Select the desired packages in the list, then click 'Extract selected packages'.",
+        "error": "Error",
+        "choose_output_message": "Choose a valid output folder.",
+        "invalid_destination": "Invalid destination",
+        "different_games": "Different games need separate folders. Uncheck 'Extract into the program folder'.",
+        "cancel_requested": "Cancellation requested. Please wait...",
+        "added": "Added {count} .pkg file(s) for extraction.",
+        "no_compatible": "No compatible .pkg files found in this search.",
+        "duplicate_warning": "Warning: '{filename}' is already in the list. Skipping duplicate.",
+        "read_pkg_error": "Could not read '{filename}': {error}",
+        "compare_pkg_error": "Could not compare '{filename}': {error}",
+        "duplicate_ignored": "Duplicate file ignored: '{filename}' is identical to '{other}'.",
+        "scan_cancelled": "Search cancelled. Packages already analyzed were kept.",
+        "scan_failed": "Could not complete the search: {error}",
+        "analyze_failed": "Error analyzing packages: {error}",
+        "no_extractable": "No compatible package available for extraction.",
+        "ignored_official": "Ignored (official)",
+        "official_warning": "Warning: '{filename}' is an official Sony package with factory encryption. Ignored to prevent a lockup.",
+        "start_extraction": "Starting extraction of {count} file(s).",
+        "mode_here": "Mode: Extract here (no game subfolder)",
+        "mode_subfolder": "Mode: .GameName subfolder based on the base game title",
+        "destination_log": "Output folder: {path}",
+        "missing_source": "Warning: '{filename}' is no longer in the source folder. Skipping this package.",
+        "base_missing": "Warning: base game title is not available in the list; using the CUSA code as the folder.",
+        "extraction_folder": "Extraction folder: {path}",
+        "package_changed": "the package changed since it was added to the list; remove and add the file again",
+        "completed_log": "✓ Completed successfully at: {path}",
+        "file_deleted": ".pkg file deleted successfully: {filename}",
+        "file_delete_failed": "Warning: Could not delete '{filename}': {error}",
+        "none_available_log": "No package available for extraction. Add the files again.",
+        "cancel_log": "\n⏹ Process cancelled by the user.",
+        "error_log": "\n❌ EXTRACTION ERROR: {error}",
+        "extract_error_title": "Extraction Error",
+        "extract_error_message": "An error occurred:\n{error}",
+        "preparing": "[{index}/{total}] Preparing: {filename}...",
+        "extracting": "[{index}/{total}] Extracting: {filename} (0.0%)",
+        "progress": "[{index}/{total}] {filename}: {percent:.1f}% ({done:.1f} MB of {total_mb:.1f} MB)",
+        "completed_file": "[{index}/{total}] Completed: {filename}",
+        "success": "Extraction completed successfully!",
+        "partial_success": "Extraction finished: {completed}/{total} packages extracted. Check the warnings in the activity history.",
+        "selected_success_log": "\nSelected packages extracted successfully.",
+        "all_success_log": "\nAll files were extracted and organized.",
+        "launcher_help": "The files were extracted and organized for easy Launcher use.",
+        "selected_success": "The selected packages were fully extracted.",
+        "all_success": "Extraction and organization completed successfully!\n\nThe files were extracted and organized for easy Launcher use.",
+        "cancelled": "Extraction cancelled.",
+        "missing_file": "File missing",
+        "extracting_status": "Extracting...",
+        "completed_status": "Completed",
+        "cancelled_status": "Cancelled",
+        "error_status": "Error",
+        "ready_status": "Ready to extract",
+        "official_status": "Official encryption",
+        "base_type": "Base Game",
+        "update_type": "Update",
+        "dlc_type": "DLC / Extra",
+        "other_type": "Other package",
+    },
+}
+
+
+_RUNTIME_TRANSLATIONS = {
+    "Conferindo a identificação completa do pacote...": "Checking the package identity...",
+    "Registro anterior inválido; os arquivos existentes serão conferidos pelo pacote.": "Previous record is invalid; existing files will be checked against the package.",
+    "Não foi possível ler o registro anterior; os arquivos existentes serão conferidos pelo pacote.": "Could not read the previous record; existing files will be checked against the package.",
+    "O registro atingiu o limite de tamanho; os arquivos sem registro serão conferidos pelo pacote.": "The record reached its size limit; files without a record will be checked against the package.",
+    "Não foi possível salvar o registro; os arquivos continuam válidos e serão conferidos na próxima tentativa.": "Could not save the record; files remain valid and will be checked on the next attempt.",
+    "chave interna dk3 desbloqueada": "Internal dk3 key unlocked",
+    "complemento sem imagem interna: extraindo licença e informações do pacote": "Add-on without an internal image: extracting license and package information",
+    "chave do sistema de arquivos (ekpfs) desbloqueada": "File-system key (ekpfs) unlocked",
+    "chaves de descriptografia geradas": "Decryption keys generated",
+    "área de dados interna localizada": "Internal data area found",
+    "complemento composto por licença e metadados; não precisa de área compactada": "Add-on contains only license and metadata; no compressed area is needed",
+    "sistema de arquivos lido": "File system read",
+    "extração concluída": "Extraction completed",
+    "o pacote foi alterado durante a extração": "The package was changed during extraction",
+    "o pacote foi alterado desde a leitura de suas informações": "The package was changed since its information was read",
+    "o pacote foi alterado durante a análise": "The package was changed during analysis",
+    "o pacote foi alterado desde que entrou na lista": "The package was changed since it was added to the list",
+    "arquivo alterado durante a conferência": "File changed during verification",
+    "arquivo alterado durante a extração": "File changed during extraction",
+    "arquivo alterado durante a gravação": "File changed while writing",
+    "arquivo extraído incompleto": "Extracted file is incomplete",
+    "tamanho inválido no arquivo": "Invalid file size",
+    "arquivo fora dos limites": "File is outside the valid limits",
+    "caminho interno inválido": "Invalid internal path",
+    "caminho de saída fora da pasta escolhida": "Output path is outside the selected folder",
+    "não é um .pkg de PS4": "This is not a PS4 .pkg file",
+    "tamanho no cabeçalho maior que o arquivo real": "Header size is larger than the actual file",
+    "imagem interna fora dos limites do pacote": "Internal image is outside the package limits",
+    "código do jogo inválido": "Invalid game code",
+    "cabeçalho de imagem interna inconsistente": "Inconsistent internal image header",
+    "jogo ou atualização sem imagem de arquivos interna": "Game or update has no internal file image",
+    "não achei a tabela de chaves": "Key table not found",
+    "image_key não encontrada no .pkg": "image_key not found in the .pkg",
+    "tabela de arquivos fora dos limites do pacote": "File table is outside the package limits",
+    "tabela de arquivos interna incompleta": "Internal file table is incomplete",
+    "mapa PFSC inválido": "Invalid PFSC map",
+    "área compactada (PFSC) não encontrada": "Compressed area (PFSC) not found",
+    "bloco compactado inválido": "Invalid compressed block",
+    "bloco compactado incompleto ou com tamanho inválido": "Incomplete or invalid-sized compressed block",
+    "falta o componente de criptografia (pycryptodome)": "The encryption component (pycryptodome) is missing",
+}
+
+
+_RUNTIME_PREFIX_TRANSLATIONS = (
+    ("Conferindo: ", "Checking: "),
+    ("Extraindo: ", "Extracting: "),
+    ("Reaproveitado: ", "Reused: "),
+    ("Extraindo novamente: ", "Extracting again: "),
+    ("mapa de arquivos: ", "File map: "),
+    ("sistema de arquivos lido: ", "File system read: "),
+    ("extração concluída: ", "Extraction completed: "),
+    ("arquivo alterado durante a conferência: ", "File changed during verification: "),
+    ("arquivo alterado durante a extração: ", "File changed during extraction: "),
+    ("arquivo alterado durante a gravação: ", "File changed while writing: "),
+    ("tamanho inválido no arquivo ", "Invalid file size in "),
+)
+
+
 def _parse_sfo(sfo_data):
     info = {}
     if sfo_data and sfo_data[:4] == b"\x00PSF":
@@ -328,7 +623,6 @@ class PkgExtractor:
         if dest in self.protected_paths:
             raise ValueError("a saída não pode substituir um pacote de origem")
         dest.parent.mkdir(parents=True, exist_ok=True)
-        # O arquivo anterior só é substituído depois de terminar a gravação.
         temporary = None
         try:
             with tempfile.NamedTemporaryFile(mode="wb", dir=dest.parent,
@@ -426,7 +720,6 @@ class PkgExtractor:
                 if actual == record["sha256"]:
                     digest = actual
             else:
-                # Arquivos antigos só são aproveitados depois de comparar todo o conteúdo.
                 candidate, compared = hashlib.sha256(), 0
                 with open(dest, "rb") as previous:
                     for data in chunks():
@@ -670,7 +963,7 @@ class PkgExtractor:
         self.sector_map.frombytes(dec[block_offsets:need])
         if sys.byteorder != "little":
             self.sector_map.byteswap()
-        if (any(a > b or b - a > SBLOCK for a, b in zip(self.sector_map, self.sector_map[1:]))
+        if (any(a > b or b - a > SBLOCK for a, b in pairwise(self.sector_map))
                 or self.sector_map[-1] > self.pfs_image_size - pfsc_off):
             raise ValueError("mapa PFSC inválido")
         log("mapa de arquivos: %d blocos de 64 KiB" % num_blocks)
@@ -748,9 +1041,9 @@ class PkgExtractor:
                 block = self._decompress_block(piece)
                 if i == 0:
                     ndinode = struct.unpack_from("<I", block, 0x30)[0]
-                    occupied = (ndinode * 0xA8) // SBLOCK
-                    if (ndinode * 0xA8) % SBLOCK:
-                        occupied += 1
+                    if not 0 < ndinode <= (self.num_blocks - 1) * (SBLOCK // 0xA8):
+                        raise ValueError("tabela de arquivos interna incompleta")
+                    occupied = (ndinode * 0xA8 + SBLOCK - 1) // SBLOCK
                 if 1 <= i <= occupied:
                     for off in range(0, SBLOCK - 0xA8 + 1, 0xA8):
                         mode = struct.unpack_from("<H", block, off)[0]
@@ -820,6 +1113,8 @@ class PkgExtractor:
 
     def extract(self, log, progress=None):
         self._check()
+        directory_paths = [_safe_join(self.extract_dir, Path(directory).relative_to(self.extract_dir))
+                           for directory in self.dirs]
         metadata_paths = {index: _safe_join(self.extract_dir, "sce_sys", ENTRY_NAMES[entry[0]])
                           for index, entry in enumerate(self.entries)
                           if entry[0] in ENTRY_NAMES and entry[0] not in META_SKIP}
@@ -842,7 +1137,6 @@ class PkgExtractor:
         self._prepare_resume(log)
         created = 0
         with open(self.path, "rb") as f:
-            # Identifica a pasta antes dos demais arquivos, inclusive em tentativas interrompidas.
             for j0, entry in sorted(
                     enumerate(self.entries), key=lambda entry: entry[1][0] != 0x1000):
                 self._check()
@@ -854,9 +1148,9 @@ class PkgExtractor:
                                        log, progress)
                 created += 1
 
-        for d in sorted(self.dirs):
+        for directory in sorted(directory_paths):
             self._check()
-            Path(d).mkdir(parents=True, exist_ok=True)
+            _safe_join(self.extract_dir, directory.relative_to(self.extract_dir)).mkdir(parents=True, exist_ok=True)
 
         sm = self.sector_map
         inodes = self.inodes
@@ -872,8 +1166,6 @@ class PkgExtractor:
                                        log, progress)
                 created += 1
         self._save_resume(log, force=True)
-        # A marca conferida inclui tamanho, datas e identidade; evita reler
-        # as mesmas informações numa segunda validação por tamanho.
         for dest, stamp in self._verified_stamps.items():
             self._check()
             if _file_stamp(dest) != stamp:
@@ -975,14 +1267,11 @@ def _check_game_identity(directory, title_id, strict=True):
 def _target_directory(out_base, item, extract_here=False, merge_update=False, game_folders=None):
     out_base = Path(out_base).resolve()
     tid = item["title_id"]
-    # Os identificadores são nomes de pasta, nunca caminhos fornecidos pelo pacote.
     if not tid or len(PureWindowsPath(tid).parts) != 1:
         raise ValueError("código do jogo inválido")
     if game_folders is None:
         game_folders = _game_folder_names([item])
     folder = game_folders.get(tid)
-    # wrapper é a pasta-mãe com nome do jogo; base é a subpasta CUSA dentro dela.
-    # Sem nome de jogo, wrapper não existe e base fica direto em out_base/CUSA.
     if folder:
         wrapper = _safe_join(out_base, folder)
         base = _safe_join(wrapper, tid)
@@ -1043,18 +1332,7 @@ def inspect_pkg_quick(pkg_path, check=lambda: None):
         title = sfo_info.get("TITLE", p.stem)
         app_ver = sfo_info.get("APP_VER", sfo_info.get("VERSION", "1.00"))
 
-        if category == "gd":
-            cat_label = "Jogo Base"
-            kind = "base"
-        elif category == "gp":
-            cat_label = "Atualização"
-            kind = "update"
-        elif category == "ac":
-            cat_label = "DLC / Extra"
-            kind = "dlc"
-        else:
-            cat_label = f"Pacote ({category})"
-            kind = "other"
+        kind = {"gd": "base", "gp": "update", "ac": "dlc"}.get(category, "other")
 
         if size >= 1024 * 1024 * 1024:
             size_str = f"{size / (1024 * 1024 * 1024):.2f} GB"
@@ -1074,7 +1352,6 @@ def inspect_pkg_quick(pkg_path, check=lambda: None):
             "title_id": title_id,
             "app_ver": app_ver,
             "category": category,
-            "category_label": cat_label,
             "kind": kind,
             "content_id": content_id,
             "size": size,
@@ -1221,7 +1498,7 @@ def _avisa_sem_crypto():
         return False
     r.withdraw()
     messagebox.showerror(
-        "PKG Extractor",
+        "Easy PKG Extractor",
         "Falta o componente de criptografia (pycryptodome).\n\n"
         "No Windows, abra o terminal e rode:\n"
         "    pip install pycryptodome\n\n"
@@ -1273,11 +1550,14 @@ def get_cpu_percent():
 class App:
     def __init__(self, root, initial_files=None):
         self.root = root
-        root.title("PKG Extractor — Extrator e organizador de PKG")
+        self.language = "en"
+        self.ui = {}
+        root.title(self._t("title"))
         root.geometry("820x620")
         root.minsize(740, 600)
 
         self.pkg_list = []
+        self._next_tree_id = 1
         self.active_extractor = None
         self.is_extracting = False
         self.is_scanning = False
@@ -1290,63 +1570,131 @@ class App:
         root.protocol("WM_DELETE_WINDOW", self.close)
 
         self._build_ui()
-        setup_drag_and_drop(root, self.handle_dropped_paths)
+        setup_drag_and_drop(root, self.add_pkgs)
         self.root.after(20, self._poll_events)
 
         if initial_files:
-            self.handle_dropped_paths(initial_files)
+            self.add_pkgs(initial_files)
         else:
             self.root.after(100, self.scan_current_folder)
 
         self.root.after(500, self._update_cpu)
 
+    def _t(self, key, **values):
+        text = LANGUAGE_TEXT[self.language][key]
+        return text.format(**values) if values else text
+
+    def _translate_runtime(self, text):
+        text = str(text)
+        if self.language == "pt":
+            return text
+        if text in _RUNTIME_TRANSLATIONS:
+            return _RUNTIME_TRANSLATIONS[text]
+        for source, target in _RUNTIME_PREFIX_TRANSLATIONS:
+            if text.startswith(source):
+                return target + text[len(source):]
+        for source, target in _RUNTIME_TRANSLATIONS.items():
+            if source in text:
+                text = text.replace(source, target)
+        return text
+
+    def _set_status(self, text):
+        self.lbl_status.config(text=self._translate_runtime(text))
+
+    def _status_text(self, status):
+        status_keys = {
+            "Pronto para extrair": "ready_status",
+            "Criptografia oficial": "official_status",
+            "Ignorado (oficial)": "ignored_official",
+            "Arquivo ausente": "missing_file",
+            "Extraindo...": "extracting_status",
+            "Concluído": "completed_status",
+            "Cancelado": "cancelled_status",
+            "Erro": "error_status",
+        }
+        key = status_keys.get(status)
+        return self._t(key) if key else self._translate_runtime(status)
+
+    def _category_label(self, item):
+        keys = {
+            "base": "base_type",
+            "update": "update_type",
+            "dlc": "dlc_type",
+        }
+        return self._t(keys.get(item.get("kind"), "other_type"))
+
     def _build_ui(self):
         root = self.root
 
-        drop_frame = tk.LabelFrame(root, text=" 📂 Adicionar Arquivos .pkg ", font=("Segoe UI", 9, "bold"), padx=10, pady=8)
+        language_bar = tk.Frame(root)
+        language_bar.pack(fill="x", padx=10, pady=(2, 0))
+        self.language_button = tk.Button(
+            language_bar, text=self._t("language_button"), command=self.toggle_language,
+            padx=6, pady=2)
+        self.language_button.pack(side="left")
+
+        drop_frame = tk.LabelFrame(root, text=self._t("add_files_frame"), font=("Segoe UI", 9, "bold"), padx=10, pady=8)
         drop_frame.pack(fill="x", padx=10, pady=6)
+        self.ui["add_files_frame"] = drop_frame
 
         lbl_hint = tk.Label(
             drop_frame,
-            text="👉 Arraste e solte seus arquivos .pkg aqui diretamente da sua pasta\n"
-                 "O programa identifica Jogo Base, Atualização ou DLC e organiza os arquivos para facilitar o uso no Launcher.",
+            text=self._t("hint"),
             font=("Segoe UI", 9),
             fg="#1565c0",
             justify="center"
         )
         lbl_hint.pack(fill="x", pady=4)
+        self.ui["hint"] = lbl_hint
 
         btn_bar = tk.Frame(drop_frame)
         btn_bar.pack(fill="x", pady=4)
 
-        tk.Button(btn_bar, text="🔍 Buscar .pkg nesta pasta", command=self.scan_current_folder, width=22).pack(side="left", padx=4)
-        tk.Button(btn_bar, text="➕ Adicionar arquivos...", command=self.pick_files, width=20).pack(side="left", padx=4)
-        tk.Button(btn_bar, text="📁 Adicionar outra pasta...", command=self.pick_folder, width=20).pack(side="left", padx=4)
-        tk.Button(btn_bar, text="🗑️ Limpar lista", command=self.clear_list, width=14).pack(side="right", padx=4)
+        self.btn_scan = tk.Button(btn_bar, text=self._t("scan_folder"), command=self.scan_current_folder, width=22)
+        self.btn_scan.pack(side="left", padx=4)
+        self.btn_add_files = tk.Button(btn_bar, text=self._t("add_files"), command=self.pick_files, width=20)
+        self.btn_add_files.pack(side="left", padx=4)
+        self.btn_add_folder = tk.Button(btn_bar, text=self._t("add_folder"), command=self.pick_folder, width=20)
+        self.btn_add_folder.pack(side="left", padx=4)
+        self.btn_clear = tk.Button(btn_bar, text=self._t("clear_list"), command=self.clear_list, width=14)
+        self.btn_clear.pack(side="right", padx=4)
+        self.ui.update({
+            "scan_folder": self.btn_scan,
+            "add_files": self.btn_add_files,
+            "add_folder": self.btn_add_folder,
+            "clear_list": self.btn_clear,
+        })
 
-        list_frame = tk.LabelFrame(root, text=" 📋 Arquivos Detectados e Analisados ", font=("Segoe UI", 9, "bold"), padx=6, pady=6)
+        list_frame = tk.LabelFrame(root, text=self._t("detected_frame"), font=("Segoe UI", 9, "bold"), padx=6, pady=6)
         list_frame.pack(fill="both", expand=True, padx=10, pady=4)
+        self.ui["detected_frame"] = list_frame
 
-        columns = ("tipo", "nome", "id", "ver", "tam", "arquivo", "status")
-        self.tree = ttk.Treeview(list_frame, columns=columns, show="headings", selectmode="extended", height=2)
+        self.package_columns = ("tipo", "nome", "id", "ver", "tam", "arquivo", "status")
+        self.tree = ttk.Treeview(
+            list_frame, columns=self.package_columns, show="headings", selectmode="extended", height=2)
         self.tree.configure(displaycolumns=("status", "tipo", "nome", "id", "ver", "tam", "arquivo"))
-
-        self.tree.heading("tipo", text="Tipo")
-        self.tree.heading("nome", text="Título do Jogo")
-        self.tree.heading("id", text="Código")
-        self.tree.heading("ver", text="Versão")
-        self.tree.heading("tam", text="Tamanho")
-        self.tree.heading("arquivo", text="Arquivo")
-        self.tree.heading("status", text="Status")
-
-        self.tree.column("tipo", width=120, anchor="w")
-        self.tree.column("nome", width=180, anchor="w")
-        self.tree.column("id", width=85, anchor="center")
-        self.tree.column("ver", width=65, anchor="center")
-        self.tree.column("tam", width=80, anchor="e")
-        self.tree.column("arquivo", width=160, anchor="w")
-        self.tree.column("status", width=110, anchor="w")
-
+        headings = {
+            "tipo": self._t("column_type"),
+            "nome": self._t("column_title"),
+            "id": self._t("column_code"),
+            "ver": self._t("column_version"),
+            "tam": self._t("column_size"),
+            "arquivo": self._t("column_file"),
+            "status": self._t("column_status"),
+        }
+        widths = {
+            "tipo": (120, "w"),
+            "nome": (180, "w"),
+            "id": (85, "center"),
+            "ver": (65, "center"),
+            "tam": (80, "e"),
+            "arquivo": (160, "w"),
+            "status": (110, "w"),
+        }
+        for column in self.package_columns:
+            self.tree.heading(column, text=headings[column])
+            width, anchor = widths[column]
+            self.tree.column(column, width=width, anchor=anchor)
         scroll_tree = ttk.Scrollbar(list_frame, orient="vertical", command=self.tree.yview)
         scroll_horizontal = ttk.Scrollbar(list_frame, orient="horizontal", command=self.tree.xview)
         self.tree.configure(yscrollcommand=scroll_tree.set, xscrollcommand=scroll_horizontal.set)
@@ -1359,78 +1707,95 @@ class App:
         dest_frame = tk.Frame(root)
         dest_frame.pack(fill="x", padx=10, pady=4)
 
-        tk.Label(dest_frame, text="Pasta de saída (será criada uma subpasta .NomeDoJogo):", font=("Segoe UI", 9, "bold")).grid(row=0, column=0, sticky="w", padx=2, pady=2)
+        dest_label = tk.Label(dest_frame, text=self._t("destination"), font=("Segoe UI", 9, "bold"))
+        dest_label.grid(row=0, column=0, sticky="w", padx=2, pady=2)
+        self.ui["destination"] = dest_label
 
         self.entry_dest = tk.Entry(dest_frame)
         self.entry_dest.insert(0, self.default_dest)
         self.entry_dest.grid(row=1, column=0, sticky="we", padx=2, pady=2)
         dest_frame.columnconfigure(0, weight=1)
 
-        self.btn_pick_dest = tk.Button(dest_frame, text="Escolher pasta...", command=self.pick_dest, width=15)
+        self.btn_pick_dest = tk.Button(dest_frame, text=self._t("choose_folder"), command=self.pick_dest, width=15)
         self.btn_pick_dest.grid(row=1, column=1, sticky="w", padx=4, pady=2)
+        self.ui["choose_folder"] = self.btn_pick_dest
 
         options_frame = tk.Frame(dest_frame)
         options_frame.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(6, 0))
         options_frame.columnconfigure((0, 1), weight=1, uniform="options")
 
         selection_frame = tk.LabelFrame(
-            options_frame, text=" Quais pacotes extrair? ", font=("Segoe UI", 10, "bold"),
+            options_frame, text=self._t("selection_frame"), font=("Segoe UI", 10, "bold"),
             bg="#edf4ff", fg="#174a7e", padx=8, pady=4)
         selection_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 5))
+        self.ui["selection_frame"] = selection_frame
         self.var_selected_pkgs = tk.BooleanVar(value=False)
         self.selection_controls = []
-        for text, value in (("Todos os pacotes da lista", False), ("Somente os pacotes selecionados", True)):
+        for key, value in (("all_packages", False), ("selected_packages", True)):
             control = tk.Radiobutton(
-                selection_frame, text=text, variable=self.var_selected_pkgs,
+                selection_frame, text=self._t(key), variable=self.var_selected_pkgs,
                 value=value, command=self._on_selection_mode, font=("Segoe UI", 9),
                 bg="#edf4ff", activebackground="#edf4ff", anchor="w")
             control.pack(fill="x")
             self.selection_controls.append(control)
-        tk.Label(selection_frame, text="Selecione na lista acima. Vários: Ctrl + clique.",
-                 font=("Segoe UI", 9), bg="#edf4ff", fg="#174a7e",
-                 wraplength=310, justify="left", anchor="w").pack(fill="x", padx=3, pady=(3, 0))
+        selection_hint = tk.Label(selection_frame, text=self._t("selection_hint"),
+                                  font=("Segoe UI", 9), bg="#edf4ff", fg="#174a7e",
+                                  wraplength=310, justify="left", anchor="w")
+        selection_hint.pack(fill="x", padx=3, pady=(3, 0))
+        self.ui["selection_hint"] = selection_hint
 
         organization_frame = tk.LabelFrame(
-            options_frame, text=" Como organizar? ", font=("Segoe UI", 10, "bold"),
+            options_frame, text=self._t("organization_frame"), font=("Segoe UI", 10, "bold"),
             padx=8, pady=4)
         organization_frame.grid(row=0, column=1, sticky="nsew", padx=(5, 0))
+        self.ui["organization_frame"] = organization_frame
         self.var_merge_update = tk.BooleanVar(value=DEFAULT_MERGE_UPDATE)
         self.chk_merge_update = tk.Checkbutton(
-            organization_frame, text="Juntar jogo e atualização", variable=self.var_merge_update,
+            organization_frame, text=self._t("merge_update"), variable=self.var_merge_update,
             font=("Segoe UI", 9), anchor="w")
         self.chk_merge_update.pack(fill="x")
-        tk.Label(organization_frame, text="Na mesma pasta. DLCs separados em addcont.",
-                 font=("Segoe UI", 8), fg="#505050", anchor="w").pack(fill="x", padx=4)
+        merge_help = tk.Label(organization_frame, text=self._t("merge_help"),
+                              font=("Segoe UI", 8), fg="#505050", anchor="w")
+        merge_help.pack(fill="x", padx=4)
+        self.ui["merge_help"] = merge_help
 
         self.var_extract_here = tk.BooleanVar(value=False)
         self.chk_extract_here = tk.Checkbutton(
-            organization_frame, text="Extrair na pasta do programa",
+            organization_frame, text=self._t("extract_here"),
             variable=self.var_extract_here, font=("Segoe UI", 9), anchor="w",
             command=self._on_toggle_extract_here)
         self.chk_extract_here.pack(fill="x")
-        tk.Label(organization_frame, text="Ignora o destino acima e não cria subpasta do jogo.",
-                 font=("Segoe UI", 8), fg="#505050", anchor="w").pack(fill="x", padx=4)
+        extract_help = tk.Label(organization_frame, text=self._t("extract_here_help"),
+                                font=("Segoe UI", 8), fg="#505050", anchor="w")
+        extract_help.pack(fill="x", padx=4)
+        self.ui["extract_here_help"] = extract_help
 
         after_frame = tk.LabelFrame(
-            options_frame, text=" Após a extração ", font=("Segoe UI", 10, "bold"),
+            options_frame, text=self._t("after_frame"), font=("Segoe UI", 10, "bold"),
             bg="#fff5e6", fg="#714500", padx=8, pady=3)
         after_frame.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(6, 0))
+        self.ui["after_frame"] = after_frame
         self.var_delete_pkg = tk.BooleanVar(value=False)
         self.chk_delete_pkg = tk.Checkbutton(
-            after_frame, text="Apagar os .pkg após extrair com sucesso",
+            after_frame, text=self._t("delete_pkg"),
             variable=self.var_delete_pkg, font=("Segoe UI", 9), anchor="w",
             bg="#fff5e6", activebackground="#fff5e6")
         self.chk_delete_pkg.pack(side="left")
-        tk.Label(after_frame, text="Remove os originais. Desmarcado = manter.",
-                 font=("Segoe UI", 9), bg="#fff5e6", fg="#714500",
-                 anchor="w").pack(side="left", padx=8)
+        self.ui.update({"merge_update": self.chk_merge_update,
+                        "extract_here": self.chk_extract_here,
+                        "delete_pkg": self.chk_delete_pkg})
+        delete_help = tk.Label(after_frame, text=self._t("delete_help"),
+                               font=("Segoe UI", 9), bg="#fff5e6", fg="#714500",
+                               anchor="w")
+        delete_help.pack(side="left", padx=8)
+        self.ui["delete_help"] = delete_help
 
         action_frame = tk.Frame(root)
         action_frame.pack(fill="x", padx=10, pady=4)
 
         self.btn_go = tk.Button(
             action_frame,
-            text="🚀 Extrair e Organizar",
+            text=self._t("extract"),
             command=self.start_batch_extraction,
             bg="#2e7d32",
             fg="white",
@@ -1441,26 +1806,28 @@ class App:
         )
         self.btn_go.pack(side="left", padx=4)
 
-        self.btn_cancel = tk.Button(action_frame, text="⏹ Cancelar", command=self.cancel, state="disabled", width=12, pady=4)
+        self.btn_cancel = tk.Button(action_frame, text=self._t("cancel"), command=self.cancel, state="disabled", width=12, pady=4)
         self.btn_cancel.pack(side="left", padx=4)
+        self.ui["cancel"] = self.btn_cancel
 
         self.cpu_frame = tk.Frame(action_frame)
         self.cpu_frame.pack(side="right", padx=6)
 
-        self.lbl_cpu = tk.Label(self.cpu_frame, text="CPU: 0%", font=("Segoe UI", 9, "bold"), fg="#1565c0", width=9, anchor="e")
+        self.lbl_cpu = tk.Label(self.cpu_frame, text=f"{self._t('cpu')} 0%", font=("Segoe UI", 9, "bold"), fg="#1565c0", width=9, anchor="e")
         self.lbl_cpu.pack(side="left", padx=2)
 
         self.cpu_bar = ttk.Progressbar(self.cpu_frame, length=65, maximum=100, mode="determinate")
         self.cpu_bar.pack(side="left", padx=2)
 
-        self.lbl_status = tk.Label(action_frame, text="Aguardando arquivos .pkg...", font=("Segoe UI", 9), anchor="w")
+        self.lbl_status = tk.Label(action_frame, text=self._t("waiting"), font=("Segoe UI", 9), anchor="w")
         self.lbl_status.pack(side="left", fill="x", expand=True, padx=8)
 
         self.bar = ttk.Progressbar(root, maximum=100, mode="determinate")
         self.bar.pack(fill="x", padx=10, pady=4)
 
-        log_frame = tk.LabelFrame(root, text=" Histórico de Atividades ", font=("Segoe UI", 8), padx=4, pady=4)
+        log_frame = tk.LabelFrame(root, text=self._t("history_frame"), font=("Segoe UI", 8), padx=4, pady=4)
         log_frame.pack(side="bottom", fill="x", padx=10, pady=4, before=list_frame)
+        self.ui["history_frame"] = log_frame
 
         self.txt = tk.Text(log_frame, height=4, font=("Consolas", 9))
         scroll_txt = ttk.Scrollbar(log_frame, orient="vertical", command=self.txt.yview)
@@ -1469,7 +1836,7 @@ class App:
         scroll_txt.pack(side="right", fill="y")
 
     def log(self, msg):
-        self.txt.insert("end", msg + "\n")
+        self.txt.insert("end", self._translate_runtime(msg) + "\n")
         self.txt.see("end")
 
     def _post(self, action, *args):
@@ -1514,15 +1881,50 @@ class App:
         if not self.closing:
             dialog(*args)
 
+    def set_language(self, language):
+        if language not in LANGUAGE_TEXT or language == self.language:
+            return
+        self.language = language
+        self.root.title(self._t("title"))
+        self.language_button.config(text=self._t("language_button"))
+        for key, widget in self.ui.items():
+            widget.config(text=self._t(key))
+        column_keys = {
+            "tipo": "column_type",
+            "nome": "column_title",
+            "id": "column_code",
+            "ver": "column_version",
+            "tam": "column_size",
+            "arquivo": "column_file",
+            "status": "column_status",
+        }
+        for column, key in column_keys.items():
+            self.tree.heading(column, text=self._t(key))
+        self.selection_controls[0].config(text=self._t("all_packages"))
+        self.selection_controls[1].config(text=self._t("selected_packages"))
+        current_cpu = self.lbl_cpu.cget("text").split()[-1]
+        self.lbl_cpu.config(text=f"{self._t('cpu')} {current_cpu}")
+        self._on_selection_mode()
+        self._render_package_list()
+        self._fit_package_list()
+        if self.is_scanning:
+            self._set_status(self._t("scanning"))
+        elif not self.is_extracting:
+            self._set_status(self._t("queue_status", count=len(self.pkg_list))
+                             if self.pkg_list else self._t("waiting"))
+
+    def toggle_language(self):
+        self.set_language("pt" if self.language == "en" else "en")
+
     def _on_selection_mode(self):
         self.chk_delete_pkg.config(state="disabled" if self.is_extracting else "normal")
-        self.btn_go.config(text="Extrair pacotes selecionados" if self.var_selected_pkgs.get()
-                           else "🚀 Extrair e Organizar")
+        self.btn_go.config(text=self._t("extract_selected") if self.var_selected_pkgs.get()
+                           else self._t("extract"))
 
     def _update_cpu(self):
         try:
             pct = get_cpu_percent()
-            self.lbl_cpu.config(text=f"CPU: {pct:.0f}%")
+            self.lbl_cpu.config(text=f"{self._t('cpu')} {pct:.0f}%")
             self.cpu_bar.config(value=pct)
         except Exception:
             pass
@@ -1533,27 +1935,24 @@ class App:
 
     def scan_current_folder(self):
         script_dir = _application_directory()
-        self.log(f"Buscando arquivos .pkg em todas as pastas e subpastas a partir de: {script_dir}...")
+        self.log(self._t("searching_from", path=script_dir))
         self.add_pkgs([script_dir])
-
-    def handle_dropped_paths(self, paths):
-        self.add_pkgs(paths)
 
     def pick_files(self):
         files = filedialog.askopenfilenames(
-            title="Escolha um ou mais arquivos .pkg",
-            filetypes=[("Arquivos .pkg de PS4", "*.pkg"), ("Todos os arquivos", "*.*")]
+            title=self._t("choose_files_title"),
+            filetypes=[(self._t("pkg_files"), "*.pkg"), (self._t("all_files"), "*.*")]
         )
         if files:
             self.add_pkgs(files)
 
     def pick_folder(self):
-        directory = filedialog.askdirectory(title="Escolha uma pasta contendo arquivos .pkg")
+        directory = filedialog.askdirectory(title=self._t("choose_folder_title"))
         if directory:
             self.add_pkgs([directory])
 
     def pick_dest(self):
-        d = filedialog.askdirectory(title="Escolha a pasta de destino")
+        d = filedialog.askdirectory(title=self._t("choose_output_title"))
         if d:
             self.entry_dest.delete(0, "end")
             self.entry_dest.insert(0, d)
@@ -1574,26 +1973,50 @@ class App:
                 self.entry_dest.delete(0, "end")
                 self.entry_dest.insert(0, self.saved_dest)
 
+    def _selected_package_ids(self):
+        return set(self.tree.selection())
+
+    def _set_package_status(self, item, status):
+        item["status"] = status
+        self.tree.set(item["tree_id"], "status", self._status_text(status))
+
+    def _package_values(self, item):
+        return (
+            self._category_label(item), item["title"], item["title_id"], item["app_ver"],
+            item["size_str"], item["filename"], self._status_text(item["status"]))
+
+    def _render_package_list(self):
+        selected = self._selected_package_ids()
+        children = self.tree.get_children()
+        if children:
+            self.tree.delete(*children)
+
+        for item in sorted(self.pkg_list, key=_package_display_key):
+            if "tree_id" not in item:
+                item["tree_id"] = f"pkg_{self._next_tree_id}"
+                self._next_tree_id += 1
+            self.tree.insert("", "end", iid=item["tree_id"], values=self._package_values(item))
+            if item["tree_id"] in selected:
+                self.tree.selection_add(item["tree_id"])
+
     def clear_list(self):
         if self.is_extracting or self.is_scanning:
             return
         self.pkg_list.clear()
-        for item in self.tree.get_children():
-            self.tree.delete(item)
+        self._render_package_list()
+        self._fit_package_list()
         self.btn_go.config(state="disabled")
-        self.lbl_status.config(text="Lista limpa. Arraste novos arquivos .pkg.")
-        self.tree.configure(height=2)
+        self._set_status(self._t("list_cleared"))
 
     def _fit_package_list(self):
         style = ttk.Style(self.root)
         font = style.lookup("Treeview", "font") or "TkDefaultFont"
         heading_font = style.lookup("Treeview.Heading", "font") or "TkHeadingFont"
-        rows = [self.tree.item(item["tree_id"], "values") for item in self.pkg_list]
-        for index, col in enumerate(self.tree["columns"]):
+        rows = [self._package_values(item) for item in self.pkg_list]
+        for index, col in enumerate(self.package_columns):
             width = int(self.root.tk.call("font", "measure", heading_font, self.tree.heading(col, "text")))
-            for text in {row[index] for row in rows if index < len(row)}:
-                width = max(width, int(self.root.tk.call("font", "measure", font,
-                                                        text)))
+            for text in {row[index] for row in rows}:
+                width = max(width, int(self.root.tk.call("font", "measure", font, text)))
             self.tree.column(col, width=width + 20, minwidth=width + 20, stretch=False)
         self.tree.configure(height=2)
         self.root.update_idletasks()
@@ -1606,7 +2029,7 @@ class App:
         self.root.update_idletasks()
         if self.root.state() == "normal":
             main_width = sum(self.tree.column(col, "width")
-                             for col in ("status", "tipo", "nome", "id", "ver", "tam")) + 50
+                             for col in ("status", "tipo", "nome", "id", "ver", "tam")) + 60
             width = min(self.root.winfo_screenwidth() - 100, max(self.root.winfo_width(), main_width))
             height = min(max_height, max(self.root.winfo_height(), self.root.winfo_reqheight()))
             y = min(self.root.winfo_y(), max(0, self.root.winfo_screenheight() - height - 80))
@@ -1615,13 +2038,13 @@ class App:
 
     def add_pkgs(self, paths):
         if self.is_extracting or self.is_scanning or self.closing:
-            self.log("Aguarde o fim da operação atual para adicionar arquivos.")
+            self.log(self._t("wait_current_operation"))
             return
         self.is_scanning = True
         self._scan_cancelled.clear()
         self.btn_go.config(state="disabled")
         self.btn_cancel.config(state="normal")
-        self.lbl_status.config(text="Buscando e analisando os pacotes...")
+        self._set_status(self._t("scanning"))
         self._worker = threading.Thread(
             target=self._run_scan, args=(tuple(paths), tuple(self.pkg_list)), daemon=True)
         self._worker.start()
@@ -1657,11 +2080,13 @@ class App:
             for path in candidates():
                 check()
                 if path in existing_paths:
-                    messages.append(f"Aviso: O arquivo '{path.name}' já está na lista. Ignorando repetido.")
+                    messages.append(self._t("duplicate_warning", filename=path.name))
                     continue
                 info = inspect_pkg_quick(path, check)
                 if not info or not info.get("valid"):
-                    messages.append(f"Não foi possível ler '{path.name}': {info['error'] if info else 'arquivo não encontrado'}")
+                    messages.append(self._t(
+                        "read_pkg_error", filename=path.name,
+                        error=info["error"] if info else self._t("file_not_found")))
                     continue
                 fingerprint = info["fingerprint"]
                 try:
@@ -1669,20 +2094,21 @@ class App:
                                       if other["path"].is_file()
                                       and _same_pkg_content(path, other["path"], check)), None)
                 except OSError as error:
-                    messages.append(f"Não foi possível comparar '{path.name}': {error}")
+                    messages.append(self._t("compare_pkg_error", filename=path.name, error=error))
                     continue
                 if duplicate:
-                    messages.append(f"Arquivo duplicado ignorado: '{path.name}' é igual a '{duplicate['filename']}'.")
+                    messages.append(self._t(
+                        "duplicate_ignored", filename=path.name, other=duplicate["filename"]))
                     continue
                 existing_paths.add(path)
                 fingerprints.setdefault(fingerprint, []).append(info)
                 found.append(info)
         except Cancelled:
-            messages.append("Busca cancelada. Os pacotes já analisados foram mantidos.")
+            messages.append(self._t("scan_cancelled"))
         except OSError as error:
-            messages.append(f"Não foi possível concluir a busca: {error}")
+            messages.append(self._t("scan_failed", error=error))
         except Exception as error:
-            messages.append(f"Erro ao analisar os pacotes: {error}")
+            messages.append(self._t("analyze_failed", error=error))
         finally:
             self._post(self._finish_scan, found, messages)
 
@@ -1692,20 +2118,17 @@ class App:
             return
         for message in messages:
             self.log(message)
-        for info in found:
-            info["tree_id"] = self.tree.insert("", "end", values=(
-                info["category_label"], info["title"], info["title_id"], info["app_ver"],
-                info["size_str"], info["filename"], info["status"]))
-            self.pkg_list.append(info)
+        self.pkg_list.extend(found)
         if found:
+            self._render_package_list()
             self._fit_package_list()
-            self.log(f"Adicionado(s) {len(found)} arquivo(s) .pkg para extração.")
+            self.log(self._t("added", count=len(found)))
         elif not self.pkg_list:
-            self.log("Nenhum arquivo .pkg compatível encontrado nesta busca.")
+            self.log(self._t("no_compatible"))
         self.btn_go.config(state="normal" if self.pkg_list else "disabled")
         self.btn_cancel.config(state="disabled")
-        self.lbl_status.config(text=f"{len(self.pkg_list)} arquivo(s) na fila. Clique em 'Extrair e Organizar'."
-                               if self.pkg_list else "Nenhum arquivo .pkg encontrado.")
+        self._set_status(self._t("queue_status", count=len(self.pkg_list))
+                         if self.pkg_list else self._t("no_packages"))
 
     def cancel(self):
         self.batch_cancelled.set()
@@ -1713,7 +2136,7 @@ class App:
         if self.active_extractor:
             self.active_extractor.cancel()
         if self.is_extracting or self.is_scanning:
-            self.log("Cancelamento solicitado. Aguarde...")
+            self.log(self._t("cancel_requested"))
 
     def start_batch_extraction(self):
         if not self.pkg_list or self.is_extracting or self.is_scanning or self.closing:
@@ -1725,20 +2148,20 @@ class App:
         selected_only = self.var_selected_pkgs.get()
         items = tuple(self.pkg_list)
         if selected_only:
-            highlighted = set(self.tree.selection())
+            highlighted = self._selected_package_ids()
             if not highlighted and len(items) == 1:
                 highlighted = {items[0]["tree_id"]}
                 self.tree.selection_set(items[0]["tree_id"])
             items = tuple(item for item in items if item["tree_id"] in highlighted)
             if not items:
-                messagebox.showinfo("Escolha o pacote", "Selecione os pacotes desejados na lista e depois clique em 'Extrair pacotes selecionados'.")
+                messagebox.showinfo(self._t("choose_package_title"), self._t("choose_package_message"))
                 return
         if extract_here:
             out_path = _application_directory()
         else:
             dest_text = self.entry_dest.get().strip()
             if not dest_text:
-                messagebox.showerror("Erro", "Escolha uma pasta de saída válida.")
+                messagebox.showerror(self._t("error"), self._t("choose_output_message"))
                 return
             out_path = Path(dest_text)
 
@@ -1746,7 +2169,7 @@ class App:
             titles = {item["title_id"] for item in items
                       if item.get("is_fake") and item.get("kind") in ("base", "update")}
             if len(titles) > 1:
-                messagebox.showerror("Destino inválido", "Jogos diferentes precisam de pastas separadas. Desmarque 'Extrair aqui'.")
+                messagebox.showerror(self._t("invalid_destination"), self._t("different_games"))
                 return
         self.batch_cancelled.clear()
         self.is_extracting = True
@@ -1763,20 +2186,20 @@ class App:
     def _run_batch(self, out_base, extract_here=False, delete_pkg=False,
                    merge_update=DEFAULT_MERGE_UPDATE, selected_only=False, items=None):
         logf = lambda m: self._post(self.log, m)
-        statusf = lambda s: self._post(self.lbl_status.config, {"text": s})
+        statusf = lambda s: self._post(self._set_status, s)
         barf = lambda v: self._post(self.bar.config, {"value": v})
-        tree_statusf = lambda tid, s: self._post(self.tree.set, tid, "status", s)
+        tree_statusf = lambda item, s: self._post(self._set_package_status, item, s)
 
         items = tuple(self.pkg_list) if items is None else items
         valid_items = [item for item in items if item.get("is_fake")]
         skipped_items = [item for item in items if not item.get("is_fake")]
 
         for sk in skipped_items:
-            tree_statusf(sk["tree_id"], "Ignorado (oficial)")
-            logf(f"Aviso: '{sk['filename']}' é um pacote oficial da Sony com criptografia de fábrica. Ignorado para não travar.")
+            tree_statusf(sk, "Ignorado (oficial)")
+            logf(self._t("official_warning", filename=sk["filename"]))
 
         if not valid_items:
-            logf("Nenhum arquivo .pkg compatível para extrair.")
+            logf(self._t("no_extractable"))
             self._post(self._finish_batch)
             return
 
@@ -1784,9 +2207,9 @@ class App:
 
         total_files = len(sorted_items)
 
-        logf(f"Iniciando extração de {len(sorted_items)} arquivo(s).")
-        logf(f"Modo: {'Extrair aqui (sem subpasta do jogo)' if extract_here else 'Subpasta .NomeDoJogo pelo título do jogo base'}")
-        logf(f"Pasta de destino: {out_base}")
+        logf(self._t("start_extraction", count=len(sorted_items)))
+        logf(self._t("mode_here" if extract_here else "mode_subfolder"))
+        logf(self._t("destination_log", path=out_base))
 
         item = sorted_items[0]
         completed = 0
@@ -1796,18 +2219,18 @@ class App:
                 if self.batch_cancelled.is_set():
                     raise Cancelled()
                 if not item["path"].is_file():
-                    tree_statusf(item["tree_id"], "Arquivo ausente")
-                    logf(f"Aviso: '{item['filename']}' não está mais na pasta de origem. Ignorando este pacote.")
+                    tree_statusf(item, "Arquivo ausente")
+                    logf(self._t("missing_source", filename=item["filename"]))
                     continue
-                tree_statusf(item["tree_id"], "Extraindo...")
+                tree_statusf(item, "Extraindo...")
                 barf(0)
-                statusf(f"[{idx}/{total_files}] Preparando: {item['filename']}...")
-                logf(f"\n--- [{idx}/{total_files}] {item['category_label']}: {item['title']} ({item['size_str']}) ---")
+                statusf(self._t("preparing", index=idx, total=total_files, filename=item["filename"]))
+                logf(f"\n--- [{idx}/{total_files}] {self._category_label(item)}: {item['title']} ({item['size_str']}) ---")
 
                 target_dir = _target_directory(out_base, item, extract_here, merge_update, game_folders)
                 if not extract_here and item["title_id"] not in game_folders:
-                    logf("Aviso: título do jogo base indisponível na lista; usando o código CUSA como pasta.")
-                logf(f"Pasta de extração: {target_dir}")
+                    logf(self._t("base_missing"))
+                logf(self._t("extraction_folder", path=target_dir))
 
                 self.active_extractor = PkgExtractor(item["path"], target_dir,
                                                      protected_paths=(entry["path"] for entry in self.pkg_list))
@@ -1817,11 +2240,11 @@ class App:
                 self.active_extractor.parse_pkg(logf)
                 if (item.get("source_stamp", self.active_extractor._parsed_stamp)
                         != self.active_extractor._parsed_stamp):
-                    raise ValueError("o pacote foi alterado desde que entrou na lista; remova e adicione o arquivo novamente")
+                    raise ValueError(self._t("package_changed"))
                 self.active_extractor.scan_fs(logf)
                 item_total = self.active_extractor.output_total
                 progress_state = {"done": 0, "last_t": 0.0}
-                statusf(f"[{idx}/{total_files}] Extraindo: {item['filename']} (0.0%)")
+                statusf(self._t("extracting", index=idx, total=total_files, filename=item["filename"]))
 
                 def on_block_progress(delta):
                     progress_state["done"] += delta
@@ -1835,50 +2258,53 @@ class App:
                         barf(pct)
                         done_mb = progress_state["done"] / (1024 * 1024)
                         total_mb = item_total / (1024 * 1024)
-                        statusf(
-                            f"[{idx}/{total_files}] {item['filename']}: "
-                            f"{pct:.1f}% ({done_mb:.1f} MB de {total_mb:.1f} MB)"
-                        )
+                        statusf(self._t(
+                            "progress", index=idx, total=total_files, filename=item["filename"],
+                            percent=pct, done=done_mb, total_mb=total_mb))
 
                 self.active_extractor.extract(logf, on_block_progress)
                 completed += 1
                 barf(100)
-                statusf(f"[{idx}/{total_files}] Concluido: {item['filename']}")
+                statusf(self._t("completed_file", index=idx, total=total_files, filename=item["filename"]))
 
                 self.active_extractor = None
 
-                tree_statusf(item["tree_id"], "Concluído")
-                logf(f"✓ Concluído com sucesso em: {target_dir}")
+                tree_statusf(item, "Concluído")
+                logf(self._t("completed_log", path=target_dir))
 
                 if delete_pkg:
                     try:
                         item["path"].unlink()
-                        logf(f"Arquivo .pkg apagado com sucesso: {item['filename']}")
+                        logf(self._t("file_deleted", filename=item["filename"]))
                     except Exception as e_del:
-                        logf(f"Aviso: Não foi possível apagar '{item['filename']}': {e_del}")
+                        logf(self._t("file_delete_failed", filename=item["filename"], error=e_del))
 
             if not completed:
-                statusf("Nenhum pacote disponível para extrair.")
-                logf("Nenhum pacote disponível para extrair. Adicione os arquivos novamente.")
+                statusf(self._t("no_extractable"))
+                logf(self._t("none_available_log"))
+                return
+            if completed < total_files:
+                message = self._t("partial_success", completed=completed, total=total_files)
+                statusf(message)
+                logf(message)
+                self._post(self._show_message, messagebox.showwarning, self._t("title"), message)
                 return
             barf(100)
-            statusf("Extração concluída com sucesso!")
-            logf("\nPacotes selecionados extraídos com sucesso." if selected_only
-                 else "\nTodos os arquivos foram extraídos e organizados.")
-            logf("Os arquivos foram extraídos e organizados para facilitar o uso no Launcher.")
-            self._post(self._show_message, messagebox.showinfo, "PKG Extractor",
-                            "Os pacotes selecionados foram extraídos por completo."
-                            if selected_only else "Extração e organização concluídas com sucesso!\n\n"
-                            "Os arquivos foram extraídos e organizados para facilitar o uso no Launcher.")
+            statusf(self._t("success"))
+            logf(self._t("selected_success_log" if selected_only else "all_success_log"))
+            logf(self._t("launcher_help"))
+            self._post(self._show_message, messagebox.showinfo, self._t("title"),
+                       self._t("selected_success" if selected_only else "all_success"))
         except Cancelled:
-            tree_statusf(item["tree_id"], "Cancelado")
-            logf("\n⏹ Processo cancelado pelo usuário.")
-            statusf("Extração cancelada.")
+            tree_statusf(item, "Cancelado")
+            logf(self._t("cancel_log"))
+            statusf(self._t("cancelled"))
         except Exception as e:
-            tree_statusf(item["tree_id"], "Erro")
-            logf(f"\n❌ ERRO durante a extração: {e}")
-            statusf(f"Erro: {e}")
-            self._post(self._show_message, messagebox.showerror, "Erro na Extração", f"Ocorreu um erro:\n{e}")
+            tree_statusf(item, "Erro")
+            logf(self._t("error_log", error=self._translate_runtime(e)))
+            statusf(f"{self._t('error')}: {self._translate_runtime(e)}")
+            self._post(self._show_message, messagebox.showerror, self._t("extract_error_title"),
+                       self._t("extract_error_message", error=self._translate_runtime(e)))
         finally:
             self.active_extractor = None
             self._post(self._finish_batch)
@@ -1927,11 +2353,17 @@ def main():
     if tk is None:
         print("O Python está sem o componente de janela (Tkinter). Use --no-gui para extrair pelo terminal.", file=sys.stderr)
         return 1
+    tkinter_cwd = os.getcwd()
+    if _FROZEN:
+        os.chdir(sys._MEIPASS)
     try:
         root = tk.Tk()
     except tk.TclError:
         print("Não foi possível abrir a janela. Use --no-gui para extrair pelo terminal.", file=sys.stderr)
         return 1
+    finally:
+        if _FROZEN:
+            os.chdir(tkinter_cwd)
     if sys.platform == "win32":
         try:
             root.iconbitmap(default="")
