@@ -16,17 +16,16 @@ O pacote contém o executável `easy-pkg-extractor.exe`. Não é necessário ins
 
 1. Extraia o ZIP.
 2. Coloque `easy-pkg-extractor.exe` na pasta do launcher, junto dos arquivos `.pkg`, ou escolha outra pasta para os PKGs.
-3. Abra o programa.
-4. Clique em **Search .pkg in this folder** para procurar `.pkg` na pasta do programa e nas subpastas.
-5. Confira a lista de arquivos encontrados.
-6. Deixe **All packages in the list** marcado para extrair tudo ou marque **Only selected packages** para escolher pacotes específicos.
-7. Clique em **Extract and Organize**.
+3. Abra o programa. Assim que inicia, ele procura automaticamente arquivos `.pkg` na pasta onde `easy-pkg-extractor.exe` está salvo e em todas as subpastas.
+4. Confira a lista de arquivos encontrados. Para repetir a busca nessa mesma pasta, clique em **Search .pkg in this folder**.
+5. Deixe **All packages in the list** marcado para extrair tudo ou marque **Only selected packages** para escolher pacotes específicos.
+6. Clique em **Extract and Organize**.
 
 Também é possível usar **Add files...** para escolher arquivos individuais ou **Add another folder...** para adicionar outra pasta.
 
 A seleção é feita por **PKG inteiro**. O programa não seleciona arquivos internos de um PKG.
 
-O idioma inicial é inglês. O botão no canto superior esquerdo alterna diretamente entre inglês e português.
+A interface do programa está em inglês.
 
 ![Exemplo da interface](docs/images/exemplo-interface.png)
 

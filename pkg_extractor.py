@@ -294,7 +294,6 @@ def _package_display_key(item):
 LANGUAGE_TEXT = {
     "pt": {
         "title": "Easy PKG Extractor — Extrator e organizador de PKG",
-        "language_button": "🌐 English",
         "add_files_frame": " 📂 Adicionar Arquivos .pkg ",
         "hint": "👉 Arraste e solte seus arquivos .pkg aqui diretamente da sua pasta\n"
                 "O programa identifica Jogo Base, Atualização ou DLC e organiza os arquivos para facilitar o uso no Launcher.",
@@ -403,7 +402,6 @@ LANGUAGE_TEXT = {
     },
     "en": {
         "title": "Easy PKG Extractor — PKG extractor and organizer",
-        "language_button": "🌐 Português",
         "add_files_frame": " 📂 Add .pkg Files ",
         "hint": "👉 Drag and drop your .pkg files here directly from their folder\n"
                 "The program identifies Base Game, Update, or DLC and organizes the files for easy Launcher use.",
@@ -1626,13 +1624,6 @@ class App:
     def _build_ui(self):
         root = self.root
 
-        language_bar = tk.Frame(root)
-        language_bar.pack(fill="x", padx=10, pady=(2, 0))
-        self.language_button = tk.Button(
-            language_bar, text=self._t("language_button"), command=self.toggle_language,
-            padx=6, pady=2)
-        self.language_button.pack(side="left")
-
         drop_frame = tk.LabelFrame(root, text=self._t("add_files_frame"), font=("Segoe UI", 9, "bold"), padx=10, pady=8)
         drop_frame.pack(fill="x", padx=10, pady=6)
         self.ui["add_files_frame"] = drop_frame
@@ -1880,41 +1871,6 @@ class App:
     def _show_message(self, dialog, *args):
         if not self.closing:
             dialog(*args)
-
-    def set_language(self, language):
-        if language not in LANGUAGE_TEXT or language == self.language:
-            return
-        self.language = language
-        self.root.title(self._t("title"))
-        self.language_button.config(text=self._t("language_button"))
-        for key, widget in self.ui.items():
-            widget.config(text=self._t(key))
-        column_keys = {
-            "tipo": "column_type",
-            "nome": "column_title",
-            "id": "column_code",
-            "ver": "column_version",
-            "tam": "column_size",
-            "arquivo": "column_file",
-            "status": "column_status",
-        }
-        for column, key in column_keys.items():
-            self.tree.heading(column, text=self._t(key))
-        self.selection_controls[0].config(text=self._t("all_packages"))
-        self.selection_controls[1].config(text=self._t("selected_packages"))
-        current_cpu = self.lbl_cpu.cget("text").split()[-1]
-        self.lbl_cpu.config(text=f"{self._t('cpu')} {current_cpu}")
-        self._on_selection_mode()
-        self._render_package_list()
-        self._fit_package_list()
-        if self.is_scanning:
-            self._set_status(self._t("scanning"))
-        elif not self.is_extracting:
-            self._set_status(self._t("queue_status", count=len(self.pkg_list))
-                             if self.pkg_list else self._t("waiting"))
-
-    def toggle_language(self):
-        self.set_language("pt" if self.language == "en" else "en")
 
     def _on_selection_mode(self):
         self.chk_delete_pkg.config(state="disabled" if self.is_extracting else "normal")
