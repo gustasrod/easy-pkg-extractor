@@ -34,12 +34,16 @@ O destino padrão usa o nome identificado no PKG do jogo base, com um ponto no i
 
 ```text
 .NomeDoJogo\\
-└─ CUSAxxxxx\\
-   └─ addcont\\
-      └─ CUSAxxxxx\\
+├─ CUSAxxxxx\\
+├─ CUSAxxxxx-patch\\
+└─ addcont\\
+   └─ CUSAxxxxx\\
+      └─ ID_DO_DLC\\
 ```
 
-Com **Juntar jogo e atualização** ativado, o jogo base e a atualização ficam na mesma pasta. As atualizações são aplicadas na ordem da versão mais antiga para a mais nova. Cada DLC continua separado dentro de `addcont`.
+Com **Juntar jogo e atualização** ativado, que é a opção padrão, o jogo base e a atualização ficam juntos dentro de `CUSAxxxxx`. Nesse caso, a pasta `CUSAxxxxx-patch` não é criada. As atualizações são aplicadas na ordem da versão mais antiga para a mais nova.
+
+Se **Juntar jogo e atualização** for desativado, a atualização fica separada em `CUSAxxxxx-patch`, como no exemplo acima. Cada DLC continua dentro de `addcont\\CUSAxxxxx\\ID_DO_DLC`.
 
 Também é possível escolher outra pasta de saída ou marcar **Extract in program folder**. Nesse caso, o resultado fica ao lado do executável.
 
