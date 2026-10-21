@@ -188,3 +188,26 @@ pyinstaller --noconfirm --clean --onefile --windowed --name easy-pkg-extractor -
 ```
 
 O arquivo gerado será `easy-pkg-extractor.exe`. O ZIP de distribuição deve conter somente esse executável.
+
+## Organização recomendada junto ao launcher
+
+Deixe o programa na mesma pasta dos arquivos do launcher e guarde os PKGs em uma subpasta, como `.PKGs`. Ao abrir, o programa procura arquivos `.pkg` na pasta do executável e em todas as subpastas, sem precisar iniciar uma busca manual.
+
+Para criar a pasta do jogo ao lado do executável e da pasta `.PKGs`, escolha como saída a própria pasta do launcher:
+
+```text
+Pasta do launcher
+├─ easy-pkg-extractor.exe
+├─ Launcher.exe e arquivos auxiliares
+├─ .PKGs/
+│  ├─ jogo-base.pkg
+│  ├─ atualização.pkg
+│  └─ dlc.pkg
+└─ .NomeDoJogo/ (criada pelo programa na pasta de saída)
+```
+
+Os nomes dos arquivos `.pkg` são apenas exemplos. Se **Output folder** apontar para outro lugar, `.NomeDoJogo` será criada nessa outra pasta, não ao lado do executável.
+
+![Exemplo da organização do programa, dos PKGs e da pasta do jogo](docs/images/exemplo-organizacao-launcher.png)
+
+*A captura mostra o executável, a pasta `.PKGs` e a pasta do jogo no Explorer. O campo **Output folder** define onde uma nova extração será criada. Para deixá-la ao lado do executável, selecione a pasta do launcher como destino.*
