@@ -778,13 +778,15 @@ class PkgExtractor:
     def _file_digest(self, path):
         before = _file_stamp(path)
         digest = hashlib.sha256()
+        buffer = bytearray(1024 * 1024)
+        view = memoryview(buffer)
         with open(path, "rb") as stream:
             while True:
                 self._check()
-                chunk = stream.read(1024 * 1024)
-                if not chunk:
+                count = stream.readinto(buffer)
+                if not count:
                     break
-                digest.update(chunk)
+                digest.update(view[:count])
         if _file_stamp(path) != before:
             raise ValueError("arquivo alterado durante a conferência: %s" % Path(path).name)
         return digest.hexdigest()
@@ -1789,6 +1791,8 @@ class App:
         root.protocol("WM_DELETE_WINDOW", self.close)
 
         self._build_ui()
+        self._center_window()
+        self._startup_geometry = self.root.geometry()
         setup_drag_and_drop(root, self.add_pkgs)
         self.root.after(20, self._poll_events)
 
@@ -1798,6 +1802,17 @@ class App:
             self.root.after(100, self.scan_current_folder)
 
         self.root.after(500, self._update_cpu)
+
+    def _center_window(self):
+        self.root.update_idletasks()
+        border = max(0, self.root.winfo_rootx() - self.root.winfo_x())
+        title = max(0, self.root.winfo_rooty() - self.root.winfo_y())
+        width = self.root.winfo_width() + 2 * border
+        height = self.root.winfo_height() + title + border
+        x = max(0, (self.root.winfo_screenwidth() - width) // 2)
+        y = max(0, (self.root.winfo_screenheight() - height) // 2)
+        self.root.geometry(f"+{x}+{y}")
+        self.root.update_idletasks()
 
     def _t(self, key, **values):
         text = LANGUAGE_TEXT[self.language][key]
@@ -2327,6 +2342,8 @@ class App:
         self.is_scanning = False
         if self.closing:
             return
+        center_startup = self.root.geometry() == self._startup_geometry
+        self._startup_geometry = None
         for message in messages:
             if isinstance(message, tuple):
                 self.log(*message)
@@ -2343,6 +2360,8 @@ class App:
         self.btn_cancel.config(state="disabled")
         self._set_status("queue_status" if self.pkg_list else "no_packages",
                          {"count": len(self.pkg_list)})
+        if center_startup:
+            self._center_window()
 
     def cancel(self):
         self.batch_cancelled.set()
