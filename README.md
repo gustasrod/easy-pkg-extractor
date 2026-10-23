@@ -1,213 +1,165 @@
 # Easy PKG Extractor
 
-Programa portátil para Windows que lê, extrai e organiza arquivos `.pkg` compatíveis com o formato usado por portes recentes de jogos para PC.
+Extrai e organiza arquivos `.pkg` de PS4 compatíveis, pensando no uso com launchers de portes de jogos para PC. **Não baixa jogos, não inclui um launcher e não executa o jogo.**
 
-> **Importante:** ele não extrai qualquer arquivo `.pkg`. O programa foi feito para PKGs de PS4 compatíveis com o formato **fake PKG 5.05+**. PKGs oficiais da Sony com criptografia de fábrica são identificados e ignorados.
+Você pode extrair todos os pacotes ou escolher somente alguns. O programa identifica jogo base, atualização e DLC e reaproveita arquivos já extraídos corretamente.
 
-## Download
+## 1. Baixar e preparar
 
-Baixe a versão pronta para usar na página de [Releases](https://github.com/gustasrod/easy-pkg-extractor/releases/latest):
+Você precisa de Windows de 64 bits, PKGs completos e compatíveis, permissão para gravar e espaço livre para o conteúdo extraído. Ele pode ocupar mais espaço que o PKG; a substituição de arquivos também usa espaço temporário.
 
-`easy-pkg-extractor-windows-x64.zip`
-
-O pacote contém o executável `easy-pkg-extractor.exe`. Não é necessário instalar Python.
-
-## Como usar
-
-1. Extraia o ZIP.
-2. Coloque `easy-pkg-extractor.exe` na pasta do launcher, junto dos arquivos `.pkg`, ou escolha outra pasta para os PKGs.
-3. Abra o programa. Assim que inicia, ele procura automaticamente arquivos `.pkg` na pasta onde `easy-pkg-extractor.exe` está salvo e em todas as subpastas.
-4. Confira a lista de arquivos encontrados. Para repetir a busca nessa mesma pasta, clique em **Search .pkg in this folder**.
-5. Deixe **All packages in the list** marcado para extrair tudo ou marque **Only selected packages** para escolher pacotes específicos.
-6. Clique em **Extract and Organize**.
-
-Também é possível usar **Add files...** para escolher arquivos individuais ou **Add another folder...** para adicionar outra pasta.
-
-A seleção é feita por **PKG inteiro**. O programa não seleciona arquivos internos de um PKG.
-
-A interface do programa está em inglês.
-
-![Exemplo da interface](docs/images/exemplo-interface.png)
-
-*Exemplo da lista de PKGs analisados e das opções de extração.*
-
-## Quais PKGs são compatíveis?
-
-### O que significa “fake PKG 5.05+”
-
-Esse é o nome usado pela comunidade para uma família de PKGs de PS4 que usa uma estrutura e chaves compatíveis com o ambiente de firmware 5.05 ou mais recente.
-
-- **Fake** não quer dizer “jogo falso”. É o nome do formato do pacote.
-- **5.05+** se refere ao firmware do PS4, não à versão do Windows ou do jogo para PC.
-- O programa foi feito para esse tipo de PKG e precisa das informações internas esperadas para conseguir extrair os arquivos.
-
-PKGs oficiais da Sony com criptografia de fábrica não são suportados. Eles aparecem como **Official encryption** ou **Criptografia oficial** e são ignorados para evitar travamentos.
-
-Mesmo dentro do formato compatível, o arquivo precisa estar completo e não pode ter sido alterado durante a leitura. Uma versão incompleta, corrompida ou com uma variação não suportada pode apresentar erro.
-
-## Como os arquivos são organizados
-
-Na opção normal, escolha uma **Output folder** (pasta de saída). O programa cria uma subpasta com ponto no começo usando o título identificado no PKG do jogo base.
-
-Com um PKG de jogo base na lista e **Join game and update** ativado — essa opção vem ativada por padrão — o resultado fica assim:
+1. Em [Releases](https://github.com/gustasrod/easy-pkg-extractor/releases/latest), baixe `easy-pkg-extractor-windows-x64.zip`.
+2. Extraia o ZIP. O arquivo que você vai abrir é `easy-pkg-extractor.exe`; **não precisa instalar Python**.
+3. Coloque o executável na pasta do launcher e os PKGs numa subpasta, por exemplo `.PKGs`:
 
 ```text
-pasta de saída\
-└─ .NomeDoJogo\
-   ├─ CUSAxxxxx\
-   │  └─ arquivos do jogo base e das atualizações\
-   └─ addcont\
-      └─ CUSAxxxxx\
-         └─ ID_DO_DLC\
-            └─ arquivos do DLC\
-```
-
-O jogo base é processado primeiro. Depois, as atualizações são processadas da versão mais antiga para a mais nova. Os DLCs e extras são processados depois e ficam separados em `addcont`.
-
-Se **Join game and update** for desativado, a atualização fica em uma pasta separada:
-
-```text
-pasta de saída\
-└─ .NomeDoJogo\
-   ├─ CUSAxxxxx\
-   ├─ CUSAxxxxx-patch\
-   └─ addcont\
-      └─ CUSAxxxxx\
-         └─ ID_DO_DLC\
-```
-
-O exemplo abaixo mostra essa organização com `CUSA08809`, `CUSA08809-patch` e `addcont` no mesmo nível:
-
-![Exemplo das pastas geradas](docs/images/exemplo-pastas.png)
-
-*Exemplo real da organização criada pelo programa.*
-
-Se a lista não tiver um PKG de jogo base identificado, o nome `.NomeDoJogo` não poderá ser criado. Nesse caso, o programa avisa no histórico e usa o código do jogo, como `CUSAxxxxx`, para jogo base ou atualização; DLCs continuam em `addcont`.
-
-### Extrair na pasta do programa
-
-Ao marcar **Extract into the program folder**, a pasta de saída escolhida é ignorada e os arquivos são gravados ao lado do executável.
-
-Esse modo não cria a subpasta `.NomeDoJogo`. Para evitar misturar jogos diferentes, ele só aceita um código de jogo base/atualização por vez.
-
-## Continuar depois de erro ou cancelamento
-
-O programa confere os arquivos que já existem antes de gravar:
-
-- arquivo completo e igual ao conteúdo do PKG: é reaproveitado;
-- arquivo ausente, incompleto ou diferente: é extraído novamente por inteiro;
-- arquivo que falhou no meio: não é considerado concluído.
-
-Por isso, se um PKG der erro, você pode selecionar outro pacote e extrair novamente sem repetir os pacotes que já terminaram corretamente.
-
-O programa guarda um pequeno registro de retomada na pasta `.pkg-extractor` dentro do destino. Esse registro usa o tamanho e uma conferência do conteúdo do arquivo. Se o registro não puder ser lido, os arquivos existentes ainda são conferidos diretamente.
-
-Cada arquivo é gravado primeiro em um temporário. Ele só substitui o arquivo final depois que a gravação e a conferência terminam. Isso protege arquivos já completos durante cancelamento, falta de espaço ou erro de leitura.
-
-## Mensagens de erro comuns
-
-### `compressed area (PFSC) not found`
-
-PFSC é a área compactada que contém os dados do sistema de arquivos de muitos PKGs de jogo base e atualização.
-
-Essa mensagem significa que o extrator precisava encontrar essa área, mas não encontrou. As causas mais comuns são:
-
-- PKG incompleto ou copiado antes de terminar;
-- formato diferente do compatível;
-- PKG que não pertence à família fake PKG 5.05+;
-- dados internos danificados.
-
-Alguns DLCs pequenos contêm somente licença e metadados. Eles podem não ter uma área PFSC e, nesse caso, a ausência dessa área é normal.
-
-Confira se o arquivo terminou de baixar ou copiar e tente novamente. Um erro em um PKG não impede a extração dos outros pacotes.
-
-### `official encryption` ou `Criptografia oficial`
-
-O programa identificou criptografia oficial da Sony, sem as chaves esperadas pelo formato compatível. Esse pacote é ignorado; ele não é convertido nem descriptografado pelo programa.
-
-## Apagar os PKGs depois da extração
-
-A opção **Delete .pkg files after successful extraction** vem desmarcada. Enquanto estiver desmarcada, os PKGs originais são mantidos.
-
-Se for marcada, o programa só tenta apagar um `.pkg` depois que a extração daquele pacote termina com sucesso. Em caso de erro ou cancelamento, o original não é apagado.
-
-Confirme sempre o resultado antes de usar essa opção, porque a exclusão do arquivo original não pode ser desfeita pelo programa.
-
-## Linha de comando
-
-Também é possível extrair um PKG sem abrir a janela:
-
-```text
-easy-pkg-extractor.exe --no-gui "arquivo.pkg" "pasta de saída"
-```
-
-Esse modo extrai o arquivo informado para a pasta indicada. Para o uso normal com vários PKGs, use a janela do programa.
-
-## Arquivos temporários do executável
-
-O executável de arquivo único pode criar pastas temporárias com nome parecido com `_MEI...` na pasta temporária do Windows enquanto está aberto. Elas são usadas apenas para carregar os componentes do programa e não são a pasta de saída dos jogos.
-
-Normalmente essas pastas são removidas quando o programa fecha. Se o Windows encerrar o processo à força, uma pasta temporária pode permanecer; ela não contém os arquivos extraídos do jogo.
-
-## Desempenho
-
-O executável usa o mesmo código de leitura, descriptografia, descompressão e gravação do arquivo Python. A extração é feita diretamente no destino escolhido.
-
-O verificador evita repetir arquivos que já foram extraídos corretamente, mas a primeira extração pode levar bastante tempo. O resultado depende principalmente do tamanho do PKG, da velocidade do disco, do processador e do antivírus.
-
-## Requisitos
-
-- Windows 64 bits.
-- Espaço livre suficiente para os arquivos extraídos.
-- Permissão para gravar na pasta de saída.
-- PKGs completos e compatíveis com o formato explicado acima.
-
-Não são distribuídos jogos, PKGs reais, saves, caches, launchers de terceiros ou arquivos retirados de jogos.
-
-Use somente arquivos que você tem direito de utilizar. Este projeto não é afiliado à Sony, PlayStation, aos donos dos jogos ou aos seus desenvolvedores.
-
-## Arquivos do projeto
-
-Na área [Releases](https://github.com/gustasrod/easy-pkg-extractor/releases) está o executável pronto:
-
-- `easy-pkg-extractor-windows-x64.zip`: pacote portátil para Windows 64 bits.
-
-No código do projeto:
-
-- `pkg_extractor.py`: código-fonte do programa;
-- `README.md`: este manual;
-- `docs/images/`: imagens usadas neste manual.
-
-## Compilar o executável
-
-Para gerar o executável a partir do código-fonte, use Python 3.12 ou mais recente:
-
-```text
-python -m pip install pycryptodome pyinstaller
-pyinstaller --noconfirm --clean --onefile --windowed --name easy-pkg-extractor --distpath ".release\\onefile-dist" --workpath ".release\\build" --specpath ".release" pkg_extractor.py
-```
-
-O arquivo gerado será `easy-pkg-extractor.exe`. O ZIP de distribuição deve conter somente esse executável.
-
-## Organização recomendada junto ao launcher
-
-Deixe o programa na mesma pasta dos arquivos do launcher e guarde os PKGs em uma subpasta, como `.PKGs`. Ao abrir, o programa procura arquivos `.pkg` na pasta do executável e em todas as subpastas, sem precisar iniciar uma busca manual.
-
-Para criar a pasta do jogo ao lado do executável e da pasta `.PKGs`, escolha como saída a própria pasta do launcher:
-
-```text
-Pasta do launcher
+Pasta do launcher\
+├─ arquivos do launcher...
 ├─ easy-pkg-extractor.exe
-├─ Launcher.exe e arquivos auxiliares
-├─ .PKGs/
-│  ├─ jogo-base.pkg
-│  ├─ atualização.pkg
-│  └─ dlc.pkg
-└─ .NomeDoJogo/ (criada pelo programa na pasta de saída)
+└─ .PKGs\
+   ├─ jogo-base.pkg
+   ├─ atualizacao.pkg
+   └─ dlc.pkg
 ```
 
-Os nomes dos arquivos `.pkg` são apenas exemplos. Se **Output folder** apontar para outro lugar, `.NomeDoJogo` será criada nessa outra pasta, não ao lado do executável.
+Os nomes acima são exemplos. `.PKGs` é uma sugestão, não um nome obrigatório. Não são distribuídos jogos, PKGs, saves ou launchers de terceiros.
 
-![Exemplo da organização do programa, dos PKGs e da pasta do jogo](docs/images/exemplo-organizacao-launcher.png)
+## 2. Abrir e extrair
 
-*A captura mostra o executável, a pasta `.PKGs` e a pasta do jogo no Explorer. O campo **Output folder** define onde uma nova extração será criada. Para deixá-la ao lado do executável, selecione a pasta do launcher como destino.*
+1. Abra `easy-pkg-extractor.exe`. Ele busca automaticamente os `.pkg` na pasta onde está salvo e nas subpastas.
+2. A janela começa em inglês. Para mudar para português, clique em **Português**, no canto superior esquerdo.
+3. Confira a lista. **Buscar .pkg nesta pasta** repete a busca; **Adicionar arquivos...** permite escolher outros PKGs. Também é possível arrastar arquivos ou pastas para a janela.
+4. Em **Pasta de saída**, escolha onde guardar o jogo. Para deixar a extração junto do launcher, escolha a própria pasta do launcher.
+5. Mantenha **Todos os pacotes da lista** ou marque **Somente os pacotes selecionados**. Nesse segundo modo, destaque os PKGs na lista; use **Ctrl + clique** para escolher vários.
+6. Clique em **Extrair e Organizar** ou **Extrair pacotes selecionados**, conforme o modo escolhido. Aguarde o status de conclusão e confira o histórico.
+
+![Interface em português, com jogo base, atualização e quatro DLCs na lista](docs/images/exemplo-interface.png)
+
+*A imagem mostra o programa antes da extração. `C:\Jogos\MeuJogo` é apenas um exemplo de destino. O tamanho mostrado na lista é o do PKG, não o espaço final do jogo.*
+
+### Opções que você precisa conhecer
+
+| Opção | O que faz |
+| --- | --- |
+| **Juntar jogo e atualização** | Vem marcada. Coloca os arquivos da atualização na pasta do jogo; arquivos de mesmo caminho podem ser substituídos. DLCs ficam separados. |
+| **Extrair na pasta do programa** | Vem desmarcada. Usa a pasta do EXE em vez do destino escolhido; veja a exceção abaixo. Não aceita jogos base/atualizações de códigos diferentes no mesmo lote. |
+| **Apagar os .pkg após extrair com sucesso** | Vem desmarcada, preservando os originais. Se marcada, tenta apagar cada PKG assim que ele termina. |
+
+**Cuidado com a exclusão:** cancelar ou ter erro em um pacote posterior não recupera os PKGs anteriores já apagados. Para manter os originais, deixe essa opção desmarcada.
+
+**Exceção do modo “na pasta do programa”:** jogo base e atualização juntada ficam diretamente ao lado do EXE, e DLCs ficam em `addcont`. Se você separar a atualização e houver um jogo base com nome válido na lista, ela ainda irá para `.NomeDoJogo\CUSAxxxxx-patch`.
+
+## 3. Onde ficam os arquivos
+
+No modo normal, com o jogo base na lista, o programa cria uma pasta com ponto no início, como `.SHADOW OF THE COLOSSUS`, dentro da saída escolhida:
+
+```text
+Pasta de saída\
+└─ .NomeDoJogo\
+   ├─ CUSAxxxxx\             jogo base e atualização juntada
+   ├─ CUSAxxxxx-patch\       atualização, quando extraída separadamente
+   └─ addcont\
+      └─ CUSAxxxxx\
+         └─ ID_DO_DLC\       arquivos do complemento
+```
+
+O nome vem do título lido no PKG base. Se esse campo não existir, usa o nome do arquivo sem `.pkg`. Caracteres incompatíveis são ajustados; se não restar um nome válido, usa o código do jogo. Títulos iguais de jogos de códigos diferentes recebem uma identificação para não se misturarem.
+
+Para cada código de jogo, a extração segue esta ordem: **base → atualizações da mais antiga para a mais nova → DLCs**. A lista pode continuar contendo o jogo base mesmo quando você escolhe extrair apenas uma atualização ou um DLC: ele ainda serve para definir o nome da pasta.
+
+![Pastas addcont, CUSA08809 e CUSA08809-patch no mesmo nível](docs/images/exemplo-pastas.png)
+
+*Exemplo de pastas com uma atualização separada. Para usar essa organização, desmarque **Juntar jogo e atualização**.*
+
+Sem um jogo base com nome válido na lista, o programa avisa e usa o código do jogo. Uma atualização vai para `CUSAxxxxx-patch`; com juntar marcado e uma pasta `CUSAxxxxx` já existente, pode usar essa pasta. DLCs continuam em `addcont`.
+
+O programa não limpa arquivos extras já existentes. Para evitar misturar versões ou jogos, use o destino correto e não mova nem altere o PKG durante a operação.
+
+## 4. Continuar depois de erro ou cancelamento
+
+Um erro de extração interrompe o lote. Os arquivos já concluídos ficam no destino; cancelar não desfaz o que terminou.
+
+Para tentar de novo ou extrair outro pacote:
+
+1. Mantenha a pasta de saída, as opções de organização e o jogo base na lista, se ele já estava nela. Confira no histórico se o destino continua o mesmo.
+2. Marque **Somente os pacotes selecionados** e destaque apenas os PKGs desejados.
+3. Clique em **Extrair pacotes selecionados**.
+
+Arquivos completos e iguais ao conteúdo do PKG são mantidos. Ausentes, incompletos ou diferentes são refeitos por inteiro. A conferência também pode levar tempo; o programa não pula automaticamente todos os pacotes com status concluído.
+
+O registro fica em `.pkg-extractor` dentro do destino de cada pacote, por exemplo `.NomeDoJogo\CUSAxxxxx\.pkg-extractor`. Se esse registro estiver ausente ou ilegível, os arquivos ainda podem ser comparados diretamente com o PKG.
+
+Cada arquivo é gravado em um temporário antes de substituir sua versão final. Em caso de cancelamento normal ou falha durante essa gravação, a versão anterior daquele arquivo é preservada. Isso não substitui um backup.
+
+## Problemas comuns e limitações
+
+| Situação | O que conferir |
+| --- | --- |
+| A lista está vazia | Confira a pasta do executável, a extensão `.pkg` e os avisos do histórico. Use **Adicionar arquivos...** para procurar em outro local. |
+| **Criptografia oficial** | O programa não encontrou a tabela interna esperada e ignora o pacote. Esse aviso sozinho não comprova sua autenticidade. Confirme o formato e a origem do arquivo. |
+| **Área compactada (PFSC) não encontrada** | Faltou uma estrutura necessária àquele pacote. Ele pode estar incompleto, danificado ou num formato não suportado. Confira se terminou de baixar ou copiar. DLCs válidos com somente licença e informações do pacote são tratados sem exigir essa área. |
+| Pacote alterado desde a análise | Espere a cópia ou o download terminar; limpe a lista e adicione os arquivos novamente. |
+| Destino de outro jogo ou sem identificação segura | Escolha uma pasta separada. Não apague arquivos desconhecidos para forçar a extração. |
+| Erro ao gravar ou falta de espaço | Confira espaço livre e permissão na pasta de saída. Depois use os passos de retomada acima. |
+
+**Nem todo `.pkg` é compatível.** As mensagens usam o rótulo **fake PKG 5.05+**; `5.05+` não é um requisito do Windows e esse rótulo não garante que qualquer pacote será aceito. O programa precisa da estrutura e das chaves previstas, não converte pacotes oficiais nem fornece chaves que estejam faltando.
+
+O conteúdo extraído precisa ser aceito pelo launcher que você usa. Concluir a extração não garante que um jogo vá funcionar no PC.
+
+O EXE usa uma pasta `_MEI...` no temporário do Windows enquanto está aberto. Ela normalmente é removida ao fechar; pode sobrar após encerramento forçado. Não é a pasta do jogo extraído. Para cancelar, prefira o botão do programa e aguarde o fechamento normal.
+
+## Uso avançado
+
+<details>
+<summary>Extrair um pacote pelo terminal</summary>
+
+No PowerShell aberto na pasta do executável:
+
+```powershell
+.\easy-pkg-extractor.exe --no-gui "C:\Jogos\MeuJogo\.PKGs\jogo-base.pkg" "C:\Jogos\MeuJogo\CUSAxxxxx"
+```
+
+Os caminhos são exemplos. Esse modo extrai **um pacote diretamente para o destino informado**, sem a organização automática da janela. Não apresenta as opções de seleção ou de exclusão dos PKGs.
+
+</details>
+
+<details>
+<summary>Executar o código Python, compilar e conferir os testes</summary>
+
+Estas etapas são para quem usa o código-fonte, não para quem baixou o EXE pronto. O ambiente conferido usa **Python 3.12.10 e PyInstaller 6.21.0 no Windows de 64 bits**; outras combinações não foram validadas nesta revisão.
+
+Baixe o código completo do repositório e abra o terminal na pasta que contém `pkg_extractor.py` e `easy-pkg-extractor.spec`. Com Python e o componente de janelas Tkinter disponíveis, instale as versões conferidas dos componentes:
+
+```powershell
+python -m pip install pycryptodome==4.0.1 zlib-ng==1.0.0 pyinstaller==6.21.0
+```
+
+Para abrir pelo Python:
+
+```powershell
+python pkg_extractor.py
+```
+
+`pycryptodome` é necessário para extrair. `zlib-ng` é opcional ao executar o Python, mas acelera a descompactação. O indicador de CPU funciona com `psutil`, se disponível, ou com a alternativa do Windows. O arquivo `Iniciar Easy PKG Extractor.vbs`, quando presente, também abre o Python; ele não substitui a instalação desses componentes.
+
+Para compilar:
+
+```powershell
+python -m PyInstaller --noconfirm --distpath ".release\onefile-dist" --workpath ".release\build" easy-pkg-extractor.spec
+```
+
+O resultado fica em `.release\onefile-dist\easy-pkg-extractor.exe`. Para distribuir, coloque somente esse EXE dentro de `easy-pkg-extractor-windows-x64.zip`.
+
+A configuração de compilação preserva os recursos de janelas e idiomas e inclui os componentes AES usados pelo extrator. Ela usa a alternativa `ctypes` da biblioteca de criptografia e evita a compressão da camada externa do EXE para reduzir o tempo de abertura. Por isso, o EXE é maior que o ZIP. A extração continua usando o mesmo código Python, com alternativas para recursos de aceleração indisponíveis.
+
+Para rodar os quatro testes de abertura disponíveis nesta revisão:
+
+```powershell
+python -B -m unittest discover -v
+```
+
+Eles conferem AES, XTS, janela, busca, idiomas e erros do executável com dados temporários. O teste do EXE dá preferência à cópia em `.release\onefile-dist`. Confira também se algum teste foi ignorado por falta de um componente; esses testes não comprovam todos os formatos de PKG nem todos os computadores.
+
+</details>
+
+Use somente arquivos que você tem direito de utilizar. O projeto não é afiliado à Sony, PlayStation ou aos desenvolvedores dos jogos.

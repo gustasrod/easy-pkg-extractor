@@ -1,5 +1,6 @@
 import hashlib
 import hmac
+import io
 import json
 import os
 import queue
@@ -10,11 +11,16 @@ import tempfile
 import time
 import weakref
 from array import array
+from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from functools import lru_cache
 from itertools import pairwise
 from pathlib import Path, PureWindowsPath
-import zlib
+try:
+    from zlib_ng import zlib_ng as zlib
+except ImportError:
+    import zlib
 
 
 _FROZEN = bool(getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"))
@@ -270,10 +276,13 @@ def _file_stamp(path):
 
 
 def _version_sort_key(value):
-    return tuple(
-        int(part) if part.isdigit() else 0
-        for part in str(value or "0").replace("-", ".").split(".")
-    )
+    result = []
+    for part in str(value or "0").replace("-", ".").split("."):
+        try:
+            result.append(int(part) if part.isdigit() else 0)
+        except ValueError:
+            result.append(0)
+    return tuple(result)
 
 
 def _pkg_sort_key(item):
@@ -293,13 +302,13 @@ def _package_display_key(item):
 
 LANGUAGE_TEXT = {
     "pt": {
+        "switch_language": "🌐 English",
         "title": "Easy PKG Extractor — Extrator e organizador de PKG",
         "add_files_frame": " 📂 Adicionar Arquivos .pkg ",
         "hint": "👉 Arraste e solte seus arquivos .pkg aqui diretamente da sua pasta\n"
                 "O programa identifica Jogo Base, Atualização ou DLC e organiza os arquivos para facilitar o uso no Launcher.",
         "scan_folder": "🔍 Buscar .pkg nesta pasta",
         "add_files": "➕ Adicionar arquivos...",
-        "add_folder": "📁 Adicionar outra pasta...",
         "clear_list": "🗑️ Limpar lista",
         "detected_frame": " 📋 Arquivos Detectados e Analisados ",
         "history_frame": " Histórico de Atividades ",
@@ -339,11 +348,11 @@ LANGUAGE_TEXT = {
         "choose_files_title": "Escolha um ou mais arquivos .pkg",
         "pkg_files": "Arquivos .pkg de PS4",
         "all_files": "Todos os arquivos",
-        "choose_folder_title": "Escolha uma pasta contendo arquivos .pkg",
         "choose_output_title": "Escolha a pasta de destino",
         "choose_package_title": "Escolha o pacote",
         "choose_package_message": "Selecione os pacotes desejados na lista e depois clique em 'Extrair pacotes selecionados'.",
         "error": "Erro",
+        "error_detail": "Erro: {error}",
         "choose_output_message": "Escolha uma pasta de saída válida.",
         "invalid_destination": "Destino inválido",
         "different_games": "Jogos diferentes precisam de pastas separadas. Desmarque 'Extrair aqui'.",
@@ -401,13 +410,13 @@ LANGUAGE_TEXT = {
         "other_type": "Outro pacote",
     },
     "en": {
+        "switch_language": "🌐 Português",
         "title": "Easy PKG Extractor — PKG extractor and organizer",
         "add_files_frame": " 📂 Add .pkg Files ",
         "hint": "👉 Drag and drop your .pkg files here directly from their folder\n"
                 "The program identifies Base Game, Update, or DLC and organizes the files for easy Launcher use.",
         "scan_folder": "🔍 Search .pkg in this folder",
         "add_files": "➕ Add files...",
-        "add_folder": "📁 Add another folder...",
         "clear_list": "🗑️ Clear list",
         "detected_frame": " 📋 Detected and Analyzed Files ",
         "history_frame": " Activity History ",
@@ -447,11 +456,11 @@ LANGUAGE_TEXT = {
         "choose_files_title": "Choose one or more .pkg files",
         "pkg_files": "PS4 .pkg files",
         "all_files": "All files",
-        "choose_folder_title": "Choose a folder containing .pkg files",
         "choose_output_title": "Choose the output folder",
         "choose_package_title": "Choose the package",
         "choose_package_message": "Select the desired packages in the list, then click 'Extract selected packages'.",
         "error": "Error",
+        "error_detail": "Error: {error}",
         "choose_output_message": "Choose a valid output folder.",
         "invalid_destination": "Invalid destination",
         "different_games": "Different games need separate folders. Uncheck 'Extract into the program folder'.",
@@ -512,6 +521,47 @@ LANGUAGE_TEXT = {
 
 
 _RUNTIME_TRANSLATIONS = {
+    LANGUAGE_TEXT["pt"]["file_not_found"]: LANGUAGE_TEXT["en"]["file_not_found"],
+    "o pacote contém arquivos e pastas com o mesmo destino": "The package contains files and directories with the same destination",
+    LANGUAGE_TEXT["pt"]["package_changed"]: LANGUAGE_TEXT["en"]["package_changed"],
+    "assinatura param.sfo inválida": "Invalid param.sfo signature",
+    "cabeçalho param.sfo incompleto": "Incomplete param.sfo header",
+    "tabela param.sfo inválida": "Invalid param.sfo table",
+    "campo param.sfo incompleto": "Incomplete param.sfo field",
+    "campo de texto param.sfo inválido": "Invalid param.sfo text field",
+    "campo numérico param.sfo inválido": "Invalid numeric param.sfo field",
+    "código do jogo inválido no pacote": "Invalid game code in the package",
+    "código do complemento inválido": "Invalid add-on code",
+    "arquivo pequeno demais para ser um .pkg": "File is too small to be a .pkg",
+    "Arquivo muito pequeno para ser .pkg": "File is too small to be a .pkg",
+    "Não é um arquivo .pkg de PS4": "This is not a PS4 .pkg file",
+    "não é um .pkg de PS4 (assinatura diferente)": "This is not a PS4 .pkg file (different signature)",
+    "não achei a tabela de chaves (não parece fake PKG 5.05+)": "Key table not found (this may not be a fake PKG 5.05+)",
+    "pacote sem imagem interna e sem param.sfo": "Package has no internal image or param.sfo",
+    "entry_keys incompleta": "Incomplete entry_keys",
+    "image_key incompleta": "Incomplete image_key",
+    "bloco RSA fora do módulo": "RSA block is outside the modulus",
+    "desembrulho RSA inválido": "Invalid RSA key wrapping",
+    "desembrulho RSA curto": "RSA key data is too short",
+    "preenchimento RSA inválido": "Invalid RSA padding",
+    "trecho XTS não é múltiplo de 16": "XTS data length is not a multiple of 16",
+    "cabeçalho PFSC inválido ou formato não suportado": "Invalid PFSC header or unsupported format",
+    "mapa PFSC fora dos limites da imagem": "PFSC map is outside the image limits",
+    "bloco PFSC fora dos limites da imagem": "PFSC block is outside the image limits",
+    "entrada fora dos limites do pacote": "Entry is outside the package limits",
+    "entrada de pasta inválida": "Invalid directory entry",
+    "a saída não pode substituir um pacote de origem": "Output cannot replace a source package",
+    "o registro da extração não pode substituir um pacote de origem": "The extraction record cannot replace a source package",
+    "o pacote usa a pasta reservada ao registro da extração": "The package uses the reserved extraction record directory",
+    "o pacote contém arquivos com o mesmo destino": "The package contains files with the same destination",
+    "a pasta de destino pertence a outro jogo ou não pôde ser identificada; escolha outra pasta": "The output folder belongs to another game or could not be identified; choose another folder",
+    "a pasta já contém arquivos sem identificação segura; escolha outra pasta": "The folder already contains files without a safe identity; choose another folder",
+    "não foi possível identificar o jogo deste pacote": "Could not identify the game in this package",
+    "o pacote foi alterado durante a análise; adicione o arquivo novamente": "The package changed during analysis; add the file again",
+    "blocos fora do mapa": "blocks outside the map",
+    "arquivo(s) reaproveitado(s)": "file(s) reused",
+    "arquivo(s) extraído(s) novamente ou criado(s).": "file(s) re-extracted or created.",
+    "arquivos no total": "files total",
     "Conferindo a identificação completa do pacote...": "Checking the package identity...",
     "Registro anterior inválido; os arquivos existentes serão conferidos pelo pacote.": "Previous record is invalid; existing files will be checked against the package.",
     "Não foi possível ler o registro anterior; os arquivos existentes serão conferidos pelo pacote.": "Could not read the previous record; existing files will be checked against the package.",
@@ -567,31 +617,120 @@ _RUNTIME_PREFIX_TRANSLATIONS = (
     ("arquivo alterado durante a extração: ", "File changed during extraction: "),
     ("arquivo alterado durante a gravação: ", "File changed while writing: "),
     ("tamanho inválido no arquivo ", "Invalid file size in "),
+    ("arquivo ", "File "),
 )
 
 
 def _parse_sfo(sfo_data):
+    if sfo_data is None:
+        return {}
+    return _read_sfo(io.BytesIO(sfo_data), len(sfo_data))
+
+
+def _read_sfo(stream, size, check=None):
+    start = stream.tell()
+    header = _read_exact(stream, min(size, 20), "cabeçalho param.sfo incompleto", check)
+    if header[:4] != b"\x00PSF":
+        raise ValueError("assinatura param.sfo inválida")
+    if len(header) < 20:
+        raise ValueError("cabeçalho param.sfo incompleto")
     info = {}
-    if sfo_data and sfo_data[:4] == b"\x00PSF":
-        if len(sfo_data) < 20:
-            raise ValueError("cabeçalho param.sfo incompleto")
-        koff, doff, count = struct.unpack_from("<3I", sfo_data, 8)
-        if 20 + count * 16 > koff or not koff <= doff <= len(sfo_data):
-            raise ValueError("tabela param.sfo inválida")
-        for i in range(count):
-            k_o, fmt, plen, _, d_o = struct.unpack_from("<2H3I", sfo_data, 20 + i * 16)
-            key_end = sfo_data.find(b"\0", koff + k_o, doff)
-            if key_end < 0 or doff + d_o + plen > len(sfo_data):
-                raise ValueError("campo param.sfo incompleto")
-            key = sfo_data[koff + k_o:key_end].decode("utf-8", "replace")
-            value = sfo_data[doff + d_o:doff + d_o + plen]
-            if fmt == 0x0204:
-                info[key] = value.rstrip(b"\x00").decode("utf-8", "replace")
-            elif fmt == 0x0404:
-                if len(value) != 4:
-                    raise ValueError("campo numérico param.sfo inválido")
-                info[key] = struct.unpack("<I", value)[0]
+    koff, doff, count = struct.unpack_from("<3I", header, 8)
+    if 20 + count * 16 > koff or not koff <= doff <= size:
+        raise ValueError("tabela param.sfo inválida")
+    for i in range(count):
+        stream.seek(start + 20 + i * 16)
+        k_o, fmt, plen, capacity, d_o = struct.unpack(
+            "<2H3I", _read_exact(stream, 16, "campo param.sfo incompleto", check))
+        if koff + k_o >= doff or plen > capacity or doff + d_o + capacity > size:
+            raise ValueError("campo param.sfo incompleto")
+        stream.seek(start + koff + k_o)
+        name = bytearray()
+        remaining = doff - koff - k_o
+        while remaining:
+            chunk = _read_exact(stream, min(4096, remaining), "campo param.sfo incompleto", check)
+            key_end = chunk.find(b"\0")
+            if key_end >= 0:
+                name.extend(chunk[:key_end])
+                break
+            name.extend(chunk)
+            remaining -= len(chunk)
+        else:
+            raise ValueError("campo param.sfo incompleto")
+        key = name.decode("utf-8", "replace")
+        if key in ("TITLE_ID", "TITLE", "CATEGORY", "APP_VER", "VERSION") and fmt != 0x0204:
+            raise ValueError("campo de texto param.sfo inválido: %s" % key)
+        if fmt == 0x0404 and plen != 4:
+            raise ValueError("campo numérico param.sfo inválido")
+        if fmt in (0x0204, 0x0404):
+            stream.seek(start + doff + d_o)
+            value = _read_exact(stream, plen, "campo param.sfo incompleto", check)
+            info[key] = (value.rstrip(b"\x00").decode("utf-8", "replace") if fmt == 0x0204
+                         else struct.unpack("<I", value)[0])
     return info
+
+
+class _WindowsXts:
+    def __init__(self, secret):
+        import ctypes
+        from ctypes import wintypes
+
+        library = ctypes.WinDLL("bcrypt", winmode=0x800)
+        handle, size, pointer = wintypes.HANDLE, wintypes.ULONG, ctypes.c_void_p
+        signatures = {
+            "BCryptOpenAlgorithmProvider": [ctypes.POINTER(handle), wintypes.LPCWSTR, wintypes.LPCWSTR, size],
+            "BCryptGenerateSymmetricKey": [handle, ctypes.POINTER(handle), pointer, size, pointer, size, size],
+            "BCryptSetProperty": [handle, wintypes.LPCWSTR, pointer, size, size],
+            "BCryptDecrypt": [handle, pointer, size, pointer, pointer, size, pointer, size, ctypes.POINTER(size), size],
+            "BCryptDestroyKey": [handle],
+            "BCryptCloseAlgorithmProvider": [handle, size],
+        }
+        for name, arguments in signatures.items():
+            function = getattr(library, name)
+            function.argtypes = arguments
+            function.restype = wintypes.LONG
+        algorithm, key = handle(), handle()
+        self._cleanup = weakref.finalize(self, self._release, library, key, algorithm)
+        try:
+            self._require(library.BCryptOpenAlgorithmProvider(ctypes.byref(algorithm), "XTS-AES", None, 0))
+            self._require(library.BCryptGenerateSymmetricKey(algorithm, ctypes.byref(key), None, 0,
+                                                            secret, len(secret), 0))
+            block_size = size(BLOCK)
+            self._require(library.BCryptSetProperty(key, "MessageBlockLength", ctypes.byref(block_size),
+                                                    ctypes.sizeof(block_size), 0))
+        except BaseException:
+            self._cleanup()
+            raise
+        self._library, self._key = library, key
+
+    @staticmethod
+    def _require(status):
+        if status:
+            raise OSError("falha na criptografia nativa do Windows (0x%08X)" % (status & 0xFFFFFFFF))
+
+    @staticmethod
+    def _release(library, key, algorithm):
+        if key:
+            library.BCryptDestroyKey(key)
+        if algorithm:
+            library.BCryptCloseAlgorithmProvider(algorithm, 0)
+
+    def decrypt(self, raw, sector_start):
+        import ctypes
+        from ctypes import wintypes
+
+        if not raw or len(raw) % BLOCK or len(raw) > 0xFFFFFFFF:
+            raise ValueError("trecho XTS nativo inválido")
+        if not 0 <= sector_start <= (1 << 64) - len(raw) // BLOCK:
+            raise ValueError("setor XTS nativo fora dos limites")
+        iv = ctypes.create_string_buffer(struct.pack("<Q", sector_start), 8)
+        result = ctypes.create_string_buffer(len(raw))
+        written = wintypes.ULONG()
+        self._require(self._library.BCryptDecrypt(self._key, raw, len(raw), None, iv, 8,
+                                                result, len(raw), ctypes.byref(written), 0))
+        if written.value != len(raw):
+            raise ValueError("trecho XTS nativo incompleto")
+        return result.raw
 
 
 class Cancelled(Exception):
@@ -606,6 +745,7 @@ class PkgExtractor:
         self.cancelled = False
         self.ecb_tweak = None
         self.ecb_data = None
+        self._windows_xts = None
         self.metadata_only = False
 
     def cancel(self):
@@ -790,6 +930,9 @@ class PkgExtractor:
             yield data
 
     def _pfs_chunks(self, size, loc, nblocks, stream):
+        if size >= 16 * 1024 * 1024 and (os.cpu_count() or 1) > 1:
+            yield from self._parallel_pfs_chunks(size, loc, nblocks, stream)
+            return
         decoded = 0
         for index in range(loc, loc + nblocks):
             self._check()
@@ -803,6 +946,56 @@ class PkgExtractor:
             data = self._decompress_block(piece)[:size - decoded]
             decoded += len(data)
             yield data
+
+    def _parallel_pfs_chunks(self, size, loc, nblocks, stream):
+        def batches():
+            remaining = size
+            batch = []
+            for index in range(loc, loc + nblocks):
+                self._check()
+                if remaining <= 0:
+                    break
+                start = self.sector_map[index]
+                stored = self.sector_map[index + 1] - start
+                if stored <= 0:
+                    continue
+                batch.append(self._read_pfsc_block(start, min(stored, SBLOCK), stream))
+                remaining -= SBLOCK
+                if len(batch) == 16:
+                    yield batch
+                    batch = []
+            if batch:
+                yield batch
+
+        def decode(batch):
+            decoded = []
+            for piece in batch:
+                self._check()
+                decoded.append(self._decompress_block(piece))
+            return b"".join(decoded)
+
+        workers = min(4, os.cpu_count() or 1)
+        pending = deque()
+        source = batches()
+        remaining = size
+        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="pkg-decompress") as pool:
+            try:
+                while remaining > 0:
+                    self._check()
+                    if len(pending) < workers + 1:
+                        batch = next(source, None)
+                        if batch is not None:
+                            pending.append(pool.submit(decode, batch))
+                            continue
+                    if not pending:
+                        break
+                    data = pending.popleft().result()[:remaining]
+                    self._check()
+                    remaining -= len(data)
+                    yield data
+            finally:
+                for future in pending:
+                    future.cancel()
 
     def parse_pkg(self, log):
         p = self.path
@@ -829,6 +1022,8 @@ class PkgExtractor:
                 raise ValueError("tamanho no cabeçalho maior que o arquivo real")
             if self.pfs_image_offset + self.pfs_image_size > file_size:
                 raise ValueError("imagem interna fora dos limites do pacote")
+            if 0 < self.pfs_image_size < 0x380:
+                raise ValueError("semente de criptografia incompleta")
             self.entries = []
             self.entry_raw = {}
             for entry, raw in _read_pkg_entries(f, table_offset, table_count, file_size, self._check):
@@ -840,7 +1035,7 @@ class PkgExtractor:
             sfo = {}
             if sfo_entry is not None:
                 f.seek(sfo_entry[4])
-                sfo = _parse_sfo(_read_exact(f, sfo_entry[5], "param.sfo incompleto", self._check))
+                sfo = _read_sfo(f, sfo_entry[5], self._check)
             content_id = hdr[0x40:0x64].decode("latin-1", "replace").rstrip("\x00")
             self.title_id = sfo.get("TITLE_ID") or content_id[7:16]
             if not isinstance(self.title_id, str):
@@ -867,6 +1062,8 @@ class PkgExtractor:
                     dk3 = _rsa_decrypt(KEYSET_DK3, _read_exact(f, 256, "entry_keys incompleta"))
                     log("chave interna dk3 desbloqueada")
                 elif ident == 0x20 and not self.metadata_only:
+                    if sz < 256:
+                        raise ValueError("image_key incompleta")
                     entry20_idx = idx_e
                     f.seek(off)
                     imgkeydata = f.read(256)
@@ -894,14 +1091,25 @@ class PkgExtractor:
         digest = hmac.new(ekpfs, struct.pack("<I", 1) + seed, hashlib.sha256).digest()
         self.ecb_tweak = AES.new(digest[:16], AES.MODE_ECB)
         self.ecb_data = AES.new(digest[16:], AES.MODE_ECB)
+        self._windows_xts = None
+        if sys.platform == "win32":
+            try:
+                self._windows_xts = _WindowsXts(digest[16:] + digest[:16])
+            except (OSError, AttributeError):
+                pass
         log("chaves de descriptografia geradas")
         return self
 
     def _xts_decrypt(self, raw, sector_start):
+        self._check()
         if len(raw) % 16:
             raise ValueError("trecho XTS não é múltiplo de 16")
         if not raw:
             return b""
+        if self._windows_xts is not None and len(raw) % BLOCK == 0:
+            result = self._windows_xts.decrypt(raw, sector_start)
+            self._check()
+            return result
         sectors = (len(raw) + BLOCK - 1) // BLOCK
         tweaks = self.ecb_tweak.encrypt(b"".join(
             struct.pack("<Q", sector_start + i) + b"\0" * 8 for i in range(sectors)))
@@ -951,14 +1159,15 @@ class PkgExtractor:
             need_al = ((need + BLOCK - 1) // BLOCK) * BLOCK
             if need_al > self.pfs_image_size - pfsc_off:
                 raise ValueError("mapa PFSC fora dos limites da imagem")
-            f.seek(self.pfs_image_offset + pfsc_off)
-            enc = _read_exact(f, need_al, "mapa PFSC truncado")
+            map_start = block_offsets // BLOCK * BLOCK
+            f.seek(self.pfs_image_offset + pfsc_off + map_start)
+            enc = _read_exact(f, need_al - map_start, "mapa PFSC truncado", self._check)
 
-        dec = self._xts_decrypt(enc, pfsc_off // BLOCK)
+        dec = self._xts_decrypt(enc, (pfsc_off + map_start) // BLOCK)
         self.pfsc_offset = pfsc_off
         self.num_blocks = num_blocks
         self.sector_map = array("Q")
-        self.sector_map.frombytes(dec[block_offsets:need])
+        self.sector_map.frombytes(dec[block_offsets - map_start:need - map_start])
         if sys.byteorder != "little":
             self.sector_map.byteswap()
         if (any(a > b or b - a > SBLOCK for a, b in pairwise(self.sector_map))
@@ -1026,6 +1235,7 @@ class PkgExtractor:
         game_dir = self.extract_dir
         current_dir = game_dir
         occupied = 0
+        inodes_per_block = SBLOCK // 0xA8
         with open(self.path, "rb") as f_in:
             for i in range(self.num_blocks):
                 self._check()
@@ -1039,11 +1249,13 @@ class PkgExtractor:
                 block = self._decompress_block(piece)
                 if i == 0:
                     ndinode = struct.unpack_from("<I", block, 0x30)[0]
-                    if not 0 < ndinode <= (self.num_blocks - 1) * (SBLOCK // 0xA8):
+                    if not 0 < ndinode <= (self.num_blocks - 1) * inodes_per_block:
                         raise ValueError("tabela de arquivos interna incompleta")
-                    occupied = (ndinode * 0xA8 + SBLOCK - 1) // SBLOCK
+                    occupied = (ndinode + inodes_per_block - 1) // inodes_per_block
                 if 1 <= i <= occupied:
                     for off in range(0, SBLOCK - 0xA8 + 1, 0xA8):
+                        if len(inodes) == ndinode:
+                            break
                         mode = struct.unpack_from("<H", block, off)[0]
                         if mode == 0:
                             break
@@ -1077,11 +1289,14 @@ class PkgExtractor:
                         ino, dtype, namelen, entsize = struct.unpack_from("<4i", b, j)
                         if ino == 0 or entsize <= 0:
                             break
-                        if namelen < 0 or entsize < 16 + namelen or j + entsize > SBLOCK:
+                        if (ino < 0 or ino >= len(inodes) or namelen < 0
+                                or entsize < 16 + namelen or j + entsize > SBLOCK):
                             raise ValueError("entrada de pasta inválida")
                         name = b[j + 16:j + 16 + namelen].decode("utf-8", "strict")
                         if dtype == PFS_CURRENT_DIR:
-                            current_dir = extract_paths.get(ino, game_dir)
+                            if ino not in extract_paths:
+                                raise ValueError("entrada de pasta inválida")
+                            current_dir = extract_paths[ino]
                         elif dtype == PFS_PARENT_DIR:
                             pass
                         else:
@@ -1118,6 +1333,8 @@ class PkgExtractor:
                           if entry[0] in ENTRY_NAMES and entry[0] not in META_SKIP}
         file_paths = [_safe_join(self.extract_dir, name) for name, _ino in self.files]
         seen = set()
+        directory_keys = {str(path).casefold() for directory in directory_paths
+                          for path in (directory, *directory.parents)}
         for paths in (metadata_paths.values(), file_paths):
             for dest in paths:
                 self._check()
@@ -1129,6 +1346,10 @@ class PkgExtractor:
                 if key in seen:
                     raise ValueError("o pacote contém arquivos com o mesmo destino: %s" % dest.name)
                 seen.add(key)
+                directory_keys.update(str(parent).casefold() for parent in dest.parents)
+        if seen & directory_keys:
+            raise ValueError("o pacote contém arquivos e pastas com o mesmo destino")
+        del seen, directory_keys
         self.extract_dir.mkdir(parents=True, exist_ok=True)
         self.reused_files = 0
         self._verified_stamps = {}
@@ -1245,7 +1466,8 @@ def _game_folder_names(items):
 def _check_game_identity(directory, title_id, strict=True):
     sfo = _safe_join(directory, "sce_sys", "param.sfo")
     if sfo.is_file():
-        existing_id = _parse_sfo(sfo.read_bytes()).get("TITLE_ID")
+        with sfo.open("rb") as stream:
+            existing_id = _read_sfo(stream, os.fstat(stream.fileno()).st_size).get("TITLE_ID")
         if existing_id != title_id:
             raise ValueError("a pasta de destino pertence a outro jogo ou não pôde ser identificada; escolha outra pasta")
         return
@@ -1315,15 +1537,13 @@ def inspect_pkg_quick(pkg_path, check=lambda: None):
             content_id = hdr[0x40:0x64].decode("latin-1", "replace").rstrip("\x00")
 
             has_dk3 = False
-            sfo_data = None
+            sfo_info = {}
             for (ident, _, _, _, off, sz), _raw in _read_pkg_entries(f, table_offset, table_count, size, check):
                 if ident == 0x10:
                     has_dk3 = True
                 elif ident == 0x1000:
                     f.seek(off)
-                    sfo_data = _read_exact(f, sz, "param.sfo incompleto", check)
-
-        sfo_info = _parse_sfo(sfo_data)
+                    sfo_info = _read_sfo(f, sz, check)
 
         category = sfo_info.get("CATEGORY", "desconhecido")
         title_id = sfo_info.get("TITLE_ID", content_id[7:16] if len(content_id) >= 16 else "PS4GAME")
@@ -1549,6 +1769,7 @@ class App:
     def __init__(self, root, initial_files=None):
         self.root = root
         self.language = "en"
+        self._status_message = ("waiting", {})
         self.ui = {}
         root.title(self._t("title"))
         root.geometry("820x620")
@@ -1582,6 +1803,26 @@ class App:
         text = LANGUAGE_TEXT[self.language][key]
         return text.format(**values) if values else text
 
+    def _toggle_language(self):
+        self.language = "pt" if self.language == "en" else "en"
+        self.root.title(self._t("title"))
+        self.btn_language.config(text=self._t("switch_language"))
+
+        for key, widget in self.ui.items():
+            widget.config(text=self._t(key))
+        for control, key in zip(self.selection_controls, ("all_packages", "selected_packages")):
+            control.config(text=self._t(key))
+        for column, key in self.package_heading_keys.items():
+            self.tree.heading(column, text=self._t(key))
+
+        self._set_status(*self._status_message)
+
+        cpu_value = self.lbl_cpu.cget("text").rsplit(" ", 1)[-1]
+        self.lbl_cpu.config(text=f"{self._t('cpu')} {cpu_value}")
+        self._on_selection_mode()
+        self._render_package_list()
+        self._fit_package_list()
+
     def _translate_runtime(self, text):
         text = str(text)
         if self.language == "pt":
@@ -1590,13 +1831,17 @@ class App:
             return _RUNTIME_TRANSLATIONS[text]
         for source, target in _RUNTIME_PREFIX_TRANSLATIONS:
             if text.startswith(source):
-                return target + text[len(source):]
+                text = target + text[len(source):]
+                break
         for source, target in _RUNTIME_TRANSLATIONS.items():
             if source in text:
                 text = text.replace(source, target)
         return text
 
-    def _set_status(self, text):
+    def _set_status(self, text, values=None):
+        self._status_message = (text, values or {})
+        if text in LANGUAGE_TEXT[self.language]:
+            text = self._t(text, **self._status_message[1])
         self.lbl_status.config(text=self._translate_runtime(text))
 
     def _status_text(self, status):
@@ -1624,6 +1869,10 @@ class App:
     def _build_ui(self):
         root = self.root
 
+        self.btn_language = tk.Button(
+            root, text=self._t("switch_language"), command=self._toggle_language, width=12)
+        self.btn_language.pack(anchor="nw", padx=10, pady=(2, 0))
+
         drop_frame = tk.LabelFrame(root, text=self._t("add_files_frame"), font=("Segoe UI", 9, "bold"), padx=10, pady=8)
         drop_frame.pack(fill="x", padx=10, pady=6)
         self.ui["add_files_frame"] = drop_frame
@@ -1645,14 +1894,11 @@ class App:
         self.btn_scan.pack(side="left", padx=4)
         self.btn_add_files = tk.Button(btn_bar, text=self._t("add_files"), command=self.pick_files, width=20)
         self.btn_add_files.pack(side="left", padx=4)
-        self.btn_add_folder = tk.Button(btn_bar, text=self._t("add_folder"), command=self.pick_folder, width=20)
-        self.btn_add_folder.pack(side="left", padx=4)
         self.btn_clear = tk.Button(btn_bar, text=self._t("clear_list"), command=self.clear_list, width=14)
         self.btn_clear.pack(side="right", padx=4)
         self.ui.update({
             "scan_folder": self.btn_scan,
             "add_files": self.btn_add_files,
-            "add_folder": self.btn_add_folder,
             "clear_list": self.btn_clear,
         })
 
@@ -1661,18 +1907,18 @@ class App:
         self.ui["detected_frame"] = list_frame
 
         self.package_columns = ("tipo", "nome", "id", "ver", "tam", "arquivo", "status")
+        self.package_heading_keys = {
+            "tipo": "column_type",
+            "nome": "column_title",
+            "id": "column_code",
+            "ver": "column_version",
+            "tam": "column_size",
+            "arquivo": "column_file",
+            "status": "column_status",
+        }
         self.tree = ttk.Treeview(
             list_frame, columns=self.package_columns, show="headings", selectmode="extended", height=2)
         self.tree.configure(displaycolumns=("status", "tipo", "nome", "id", "ver", "tam", "arquivo"))
-        headings = {
-            "tipo": self._t("column_type"),
-            "nome": self._t("column_title"),
-            "id": self._t("column_code"),
-            "ver": self._t("column_version"),
-            "tam": self._t("column_size"),
-            "arquivo": self._t("column_file"),
-            "status": self._t("column_status"),
-        }
         widths = {
             "tipo": (120, "w"),
             "nome": (180, "w"),
@@ -1683,7 +1929,7 @@ class App:
             "status": (110, "w"),
         }
         for column in self.package_columns:
-            self.tree.heading(column, text=headings[column])
+            self.tree.heading(column, text=self._t(self.package_heading_keys[column]))
             width, anchor = widths[column]
             self.tree.column(column, width=width, anchor=anchor)
         scroll_tree = ttk.Scrollbar(list_frame, orient="vertical", command=self.tree.yview)
@@ -1826,7 +2072,9 @@ class App:
         self.txt.pack(side="left", fill="both", expand=True)
         scroll_txt.pack(side="right", fill="y")
 
-    def log(self, msg):
+    def log(self, msg, values=None):
+        if values is not None and msg in LANGUAGE_TEXT[self.language]:
+            msg = self._t(msg, **values)
         self.txt.insert("end", self._translate_runtime(msg) + "\n")
         self.txt.see("end")
 
@@ -1851,8 +2099,9 @@ class App:
         self.closing = True
         self.batch_cancelled.set()
         self._scan_cancelled.set()
-        if self.active_extractor:
-            self.active_extractor.cancel()
+        extractor = self.active_extractor
+        if extractor:
+            extractor.cancel()
         self._close_when_ready()
 
     def _close_when_ready(self):
@@ -1869,8 +2118,15 @@ class App:
             self.root.destroy()
 
     def _show_message(self, dialog, *args):
-        if not self.closing:
-            dialog(*args)
+        if self.closing:
+            return
+        texts = []
+        for value in args:
+            if isinstance(value, tuple):
+                key, values = value
+                value = self._translate_runtime(self._t(key, **values))
+            texts.append(value)
+        dialog(*texts)
 
     def _on_selection_mode(self):
         self.chk_delete_pkg.config(state="disabled" if self.is_extracting else "normal")
@@ -1901,11 +2157,6 @@ class App:
         )
         if files:
             self.add_pkgs(files)
-
-    def pick_folder(self):
-        directory = filedialog.askdirectory(title=self._t("choose_folder_title"))
-        if directory:
-            self.add_pkgs([directory])
 
     def pick_dest(self):
         d = filedialog.askdirectory(title=self._t("choose_output_title"))
@@ -1962,7 +2213,7 @@ class App:
         self._render_package_list()
         self._fit_package_list()
         self.btn_go.config(state="disabled")
-        self._set_status(self._t("list_cleared"))
+        self._set_status("list_cleared")
 
     def _fit_package_list(self):
         style = ttk.Style(self.root)
@@ -2000,10 +2251,14 @@ class App:
         self._scan_cancelled.clear()
         self.btn_go.config(state="disabled")
         self.btn_cancel.config(state="normal")
-        self._set_status(self._t("scanning"))
-        self._worker = threading.Thread(
-            target=self._run_scan, args=(tuple(paths), tuple(self.pkg_list)), daemon=True)
-        self._worker.start()
+        self._set_status("scanning")
+        try:
+            self._worker = threading.Thread(
+                target=self._run_scan, args=(tuple(paths), tuple(self.pkg_list)), daemon=True)
+            self._worker.start()
+        except RuntimeError as error:
+            self._worker = None
+            self._finish_scan([], [("scan_failed", {"error": str(error)})])
 
     def _run_scan(self, paths, existing):
         found, messages = [], []
@@ -2022,7 +2277,8 @@ class App:
                 check()
                 source = Path(source).resolve()
                 if source.is_dir():
-                    for directory, dirs, files in os.walk(source):
+                    for directory, dirs, files in os.walk(
+                            source, onerror=lambda error: messages.append(("scan_failed", {"error": str(error)}))):
                         check()
                         dirs[:] = sorted(d for d in dirs if d.lower() not in ignored)
                         for name in sorted(files):
@@ -2036,13 +2292,13 @@ class App:
             for path in candidates():
                 check()
                 if path in existing_paths:
-                    messages.append(self._t("duplicate_warning", filename=path.name))
+                    messages.append(("duplicate_warning", {"filename": path.name}))
                     continue
                 info = inspect_pkg_quick(path, check)
                 if not info or not info.get("valid"):
-                    messages.append(self._t(
-                        "read_pkg_error", filename=path.name,
-                        error=info["error"] if info else self._t("file_not_found")))
+                    messages.append(("read_pkg_error", {
+                        "filename": path.name,
+                        "error": info["error"] if info else LANGUAGE_TEXT["pt"]["file_not_found"]}))
                     continue
                 fingerprint = info["fingerprint"]
                 try:
@@ -2050,21 +2306,20 @@ class App:
                                       if other["path"].is_file()
                                       and _same_pkg_content(path, other["path"], check)), None)
                 except OSError as error:
-                    messages.append(self._t("compare_pkg_error", filename=path.name, error=error))
+                    messages.append(("compare_pkg_error", {"filename": path.name, "error": str(error)}))
                     continue
                 if duplicate:
-                    messages.append(self._t(
-                        "duplicate_ignored", filename=path.name, other=duplicate["filename"]))
+                    messages.append(("duplicate_ignored", {"filename": path.name, "other": duplicate["filename"]}))
                     continue
                 existing_paths.add(path)
                 fingerprints.setdefault(fingerprint, []).append(info)
                 found.append(info)
         except Cancelled:
-            messages.append(self._t("scan_cancelled"))
+            messages.append(("scan_cancelled", {}))
         except OSError as error:
-            messages.append(self._t("scan_failed", error=error))
+            messages.append(("scan_failed", {"error": str(error)}))
         except Exception as error:
-            messages.append(self._t("analyze_failed", error=error))
+            messages.append(("analyze_failed", {"error": str(error)}))
         finally:
             self._post(self._finish_scan, found, messages)
 
@@ -2073,7 +2328,10 @@ class App:
         if self.closing:
             return
         for message in messages:
-            self.log(message)
+            if isinstance(message, tuple):
+                self.log(*message)
+            else:
+                self.log(message)
         self.pkg_list.extend(found)
         if found:
             self._render_package_list()
@@ -2083,14 +2341,15 @@ class App:
             self.log(self._t("no_compatible"))
         self.btn_go.config(state="normal" if self.pkg_list else "disabled")
         self.btn_cancel.config(state="disabled")
-        self._set_status(self._t("queue_status", count=len(self.pkg_list))
-                         if self.pkg_list else self._t("no_packages"))
+        self._set_status("queue_status" if self.pkg_list else "no_packages",
+                         {"count": len(self.pkg_list)})
 
     def cancel(self):
         self.batch_cancelled.set()
         self._scan_cancelled.set()
-        if self.active_extractor:
-            self.active_extractor.cancel()
+        extractor = self.active_extractor
+        if extractor:
+            extractor.cancel()
         if self.is_extracting or self.is_scanning:
             self.log(self._t("cancel_requested"))
 
@@ -2136,57 +2395,63 @@ class App:
         self.btn_go.config(state="disabled")
         self.btn_cancel.config(state="normal")
 
-        self._worker = threading.Thread(target=self._run_batch, args=(out_path, extract_here, delete_pkg, merge_update, selected_only, items), daemon=True)
-        self._worker.start()
+        try:
+            self._worker = threading.Thread(
+                target=self._run_batch,
+                args=(out_path, extract_here, delete_pkg, merge_update, selected_only, items), daemon=True)
+            self._worker.start()
+        except RuntimeError as error:
+            self._worker = None
+            self._finish_batch()
+            self.log(self._t("error_log", error=self._translate_runtime(error)))
+            self._set_status("error_detail", {"error": str(error)})
+            self._show_message(messagebox.showerror, self._t("extract_error_title"),
+                               self._t("extract_error_message", error=self._translate_runtime(error)))
 
     def _run_batch(self, out_base, extract_here=False, delete_pkg=False,
                    merge_update=DEFAULT_MERGE_UPDATE, selected_only=False, items=None):
-        logf = lambda m: self._post(self.log, m)
-        statusf = lambda s: self._post(self._set_status, s)
+        logf = lambda message, **values: self._post(self.log, message, values)
+        statusf = lambda key, **values: self._post(self._set_status, key, values)
         barf = lambda v: self._post(self.bar.config, {"value": v})
         tree_statusf = lambda item, s: self._post(self._set_package_status, item, s)
 
         items = tuple(self.pkg_list) if items is None else items
-        valid_items = [item for item in items if item.get("is_fake")]
-        skipped_items = [item for item in items if not item.get("is_fake")]
-
-        for sk in skipped_items:
-            tree_statusf(sk, "Ignorado (oficial)")
-            logf(self._t("official_warning", filename=sk["filename"]))
-
-        if not valid_items:
-            logf(self._t("no_extractable"))
-            self._post(self._finish_batch)
-            return
-
-        sorted_items = sorted(valid_items, key=_pkg_sort_key)
-
-        total_files = len(sorted_items)
-
-        logf(self._t("start_extraction", count=len(sorted_items)))
-        logf(self._t("mode_here" if extract_here else "mode_subfolder"))
-        logf(self._t("destination_log", path=out_base))
-
-        item = sorted_items[0]
+        item = None
         completed = 0
         try:
+            valid_items = [entry for entry in items if entry.get("is_fake")]
+            for skipped in (entry for entry in items if not entry.get("is_fake")):
+                tree_statusf(skipped, "Ignorado (oficial)")
+                logf("official_warning", filename=skipped["filename"])
+            if not valid_items:
+                logf("no_extractable")
+                return
+            sorted_items = sorted(valid_items, key=_pkg_sort_key)
+            total_files = len(sorted_items)
+            item = sorted_items[0]
+            logf("start_extraction", count=total_files)
+            logf("mode_here" if extract_here else "mode_subfolder")
+            logf("destination_log", path=out_base)
             game_folders = _game_folder_names(self.pkg_list)
             for idx, item in enumerate(sorted_items, 1):
                 if self.batch_cancelled.is_set():
                     raise Cancelled()
                 if not item["path"].is_file():
                     tree_statusf(item, "Arquivo ausente")
-                    logf(self._t("missing_source", filename=item["filename"]))
+                    logf("missing_source", filename=item["filename"])
                     continue
                 tree_statusf(item, "Extraindo...")
                 barf(0)
-                statusf(self._t("preparing", index=idx, total=total_files, filename=item["filename"]))
-                logf(f"\n--- [{idx}/{total_files}] {self._category_label(item)}: {item['title']} ({item['size_str']}) ---")
+                statusf("preparing", index=idx, total=total_files, filename=item["filename"])
+                self._post(
+                    lambda package, index, total: self.log(
+                        f"\n--- [{index}/{total}] {self._category_label(package)}: {package['title']} ({package['size_str']}) ---"),
+                    item, idx, total_files)
 
                 target_dir = _target_directory(out_base, item, extract_here, merge_update, game_folders)
                 if not extract_here and item["title_id"] not in game_folders:
-                    logf(self._t("base_missing"))
-                logf(self._t("extraction_folder", path=target_dir))
+                    logf("base_missing")
+                logf("extraction_folder", path=target_dir)
 
                 self.active_extractor = PkgExtractor(item["path"], target_dir,
                                                      protected_paths=(entry["path"] for entry in self.pkg_list))
@@ -2196,11 +2461,11 @@ class App:
                 self.active_extractor.parse_pkg(logf)
                 if (item.get("source_stamp", self.active_extractor._parsed_stamp)
                         != self.active_extractor._parsed_stamp):
-                    raise ValueError(self._t("package_changed"))
+                    raise ValueError(LANGUAGE_TEXT["pt"]["package_changed"])
                 self.active_extractor.scan_fs(logf)
                 item_total = self.active_extractor.output_total
                 progress_state = {"done": 0, "last_t": 0.0}
-                statusf(self._t("extracting", index=idx, total=total_files, filename=item["filename"]))
+                statusf("extracting", index=idx, total=total_files, filename=item["filename"])
 
                 def on_block_progress(delta):
                     progress_state["done"] += delta
@@ -2214,53 +2479,59 @@ class App:
                         barf(pct)
                         done_mb = progress_state["done"] / (1024 * 1024)
                         total_mb = item_total / (1024 * 1024)
-                        statusf(self._t(
-                            "progress", index=idx, total=total_files, filename=item["filename"],
-                            percent=pct, done=done_mb, total_mb=total_mb))
+                        statusf("progress", index=idx, total=total_files, filename=item["filename"],
+                                percent=pct, done=done_mb, total_mb=total_mb)
 
                 self.active_extractor.extract(logf, on_block_progress)
+                if self.batch_cancelled.is_set():
+                    raise Cancelled()
                 completed += 1
                 barf(100)
-                statusf(self._t("completed_file", index=idx, total=total_files, filename=item["filename"]))
-
-                self.active_extractor = None
+                statusf("completed_file", index=idx, total=total_files, filename=item["filename"])
 
                 tree_statusf(item, "Concluído")
-                logf(self._t("completed_log", path=target_dir))
+                logf("completed_log", path=target_dir)
 
                 if delete_pkg:
                     try:
+                        if _file_stamp(item["path"]) != self.active_extractor._parsed_stamp:
+                            raise ValueError("o pacote foi alterado durante a extração")
                         item["path"].unlink()
-                        logf(self._t("file_deleted", filename=item["filename"]))
+                        logf("file_deleted", filename=item["filename"])
                     except Exception as e_del:
-                        logf(self._t("file_delete_failed", filename=item["filename"], error=e_del))
+                        logf("file_delete_failed", filename=item["filename"], error=str(e_del))
+                self.active_extractor = None
 
             if not completed:
-                statusf(self._t("no_extractable"))
-                logf(self._t("none_available_log"))
+                statusf("no_extractable")
+                logf("none_available_log")
                 return
             if completed < total_files:
-                message = self._t("partial_success", completed=completed, total=total_files)
-                statusf(message)
-                logf(message)
-                self._post(self._show_message, messagebox.showwarning, self._t("title"), message)
+                values = {"completed": completed, "total": total_files}
+                statusf("partial_success", **values)
+                logf("partial_success", **values)
+                self._post(self._show_message, messagebox.showwarning,
+                           ("title", {}), ("partial_success", values))
                 return
             barf(100)
-            statusf(self._t("success"))
-            logf(self._t("selected_success_log" if selected_only else "all_success_log"))
-            logf(self._t("launcher_help"))
-            self._post(self._show_message, messagebox.showinfo, self._t("title"),
-                       self._t("selected_success" if selected_only else "all_success"))
+            statusf("success")
+            logf("selected_success_log" if selected_only else "all_success_log")
+            logf("launcher_help")
+            self._post(self._show_message, messagebox.showinfo, ("title", {}),
+                       ("selected_success" if selected_only else "all_success", {}))
         except Cancelled:
-            tree_statusf(item, "Cancelado")
-            logf(self._t("cancel_log"))
-            statusf(self._t("cancelled"))
+            if item is not None:
+                tree_statusf(item, "Cancelado")
+            logf("cancel_log")
+            statusf("cancelled")
         except Exception as e:
-            tree_statusf(item, "Erro")
-            logf(self._t("error_log", error=self._translate_runtime(e)))
-            statusf(f"{self._t('error')}: {self._translate_runtime(e)}")
-            self._post(self._show_message, messagebox.showerror, self._t("extract_error_title"),
-                       self._t("extract_error_message", error=self._translate_runtime(e)))
+            if item is not None:
+                tree_statusf(item, "Erro")
+            values = {"error": str(e)}
+            logf("error_log", **values)
+            statusf("error_detail", **values)
+            self._post(self._show_message, messagebox.showerror,
+                       ("extract_error_title", {}), ("extract_error_message", values))
         finally:
             self.active_extractor = None
             self._post(self._finish_batch)
@@ -2286,7 +2557,8 @@ def main():
     if no_gui:
         args = [a for a in sys.argv[1:] if a != "--no-gui"]
         if len(args) != 2:
-            print('Uso: python pkg_extractor.py --no-gui "arquivo.pkg" "pasta de saída"', file=sys.stderr)
+            program = Path(sys.executable).name if getattr(sys, "frozen", False) else "python pkg_extractor.py"
+            print(f'Uso: {program} --no-gui "arquivo.pkg" "pasta de saída"', file=sys.stderr)
             return 2
         try:
             ex = PkgExtractor(*args)
