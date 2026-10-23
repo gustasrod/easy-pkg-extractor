@@ -8,8 +8,8 @@ Você pode extrair todos os pacotes ou escolher somente alguns. O programa ident
 
 Você precisa de Windows de 64 bits, PKGs completos e compatíveis, permissão para gravar e espaço livre para o conteúdo extraído. Ele pode ocupar mais espaço que o PKG; a substituição de arquivos também usa espaço temporário.
 
-1. Em [Releases](https://github.com/gustasrod/easy-pkg-extractor/releases/latest), baixe `easy-pkg-extractor-windows-x64.zip`.
-2. Extraia o ZIP. O arquivo que você vai abrir é `easy-pkg-extractor.exe`; **não precisa instalar Python**.
+1. Em [Releases](https://github.com/gustasrod/easy-pkg-extractor/releases/latest), baixe **`easy-pkg-extractor.exe`**.
+2. O download já é o programa pronto: **não precisa extrair ZIP nem instalar Python**.
 3. Coloque o executável na pasta do launcher e os PKGs numa subpasta, por exemplo `.PKGs`:
 
 ```text
@@ -24,6 +24,10 @@ Pasta do launcher\
 
 Os nomes acima são exemplos. `.PKGs` é uma sugestão, não um nome obrigatório. Não são distribuídos jogos, PKGs, saves ou launchers de terceiros.
 
+![Executável na pasta do launcher, com as pastas .PKGs e do jogo extraído ao lado](docs/images/exemplo-organizacao-launcher.png)
+
+*Exemplo recomendado: o EXE fica junto do launcher; `.PKGs` guarda os pacotes e a pasta com ponto no início guarda o jogo extraído. Os outros arquivos mostrados pertencem ao launcher, não a este download. O destino exibido na janela é o local usado nesse exemplo; confira o seu antes de extrair.*
+
 ## 2. Abrir e extrair
 
 1. Abra `easy-pkg-extractor.exe`. Ele busca automaticamente os `.pkg` na pasta onde está salvo e nas subpastas.
@@ -35,7 +39,7 @@ Os nomes acima são exemplos. `.PKGs` é uma sugestão, não um nome obrigatóri
 
 ![Interface em português, com jogo base, atualização e quatro DLCs na lista](docs/images/exemplo-interface.png)
 
-*A imagem mostra o programa antes da extração. `C:\Jogos\MeuJogo` é apenas um exemplo de destino. O tamanho mostrado na lista é o do PKG, não o espaço final do jogo.*
+*A imagem mostra seis pacotes analisados, antes da extração. O tamanho na lista é o do PKG, não o espaço final do jogo. O histórico dessa captura também avisa que `easy-pkg-extractor.pkg` não é um PKG de PS4 válido: esse arquivo não entrou na lista. Não renomeie o `.exe` ou o `.py` para `.pkg`.*
 
 ### Opções que você precisa conhecer
 
@@ -124,41 +128,25 @@ Os caminhos são exemplos. Esse modo extrai **um pacote diretamente para o desti
 </details>
 
 <details>
-<summary>Executar o código Python, compilar e conferir os testes</summary>
+<summary>Executar pelo código Python</summary>
 
-Estas etapas são para quem usa o código-fonte, não para quem baixou o EXE pronto. O ambiente conferido usa **Python 3.12.10 e PyInstaller 6.21.0 no Windows de 64 bits**; outras combinações não foram validadas nesta revisão.
+Estas etapas são para quem usa o código-fonte, não para quem baixou o EXE pronto. O ambiente conferido usa **Python 3.12.10 no Windows de 64 bits**, com Tkinter (componente de janelas); outras combinações não foram validadas nesta revisão.
 
-Baixe o código completo do repositório e abra o terminal na pasta que contém `pkg_extractor.py` e `easy-pkg-extractor.spec`. Com Python e o componente de janelas Tkinter disponíveis, instale as versões conferidas dos componentes:
-
-```powershell
-python -m pip install pycryptodome==4.0.1 zlib-ng==1.0.0 pyinstaller==6.21.0
-```
-
-Para abrir pelo Python:
+Baixe `easy-pkg-extractor.py` deste repositório e abra o terminal na pasta onde ele está salvo. Com Python disponível, instale o componente necessário para extrair e a aceleração opcional:
 
 ```powershell
-python pkg_extractor.py
+python -m pip install pycryptodome==4.0.1 zlib-ng==1.0.0
 ```
 
-`pycryptodome` é necessário para extrair. `zlib-ng` é opcional ao executar o Python, mas acelera a descompactação. O indicador de CPU funciona com `psutil`, se disponível, ou com a alternativa do Windows. O arquivo `Iniciar Easy PKG Extractor.vbs`, quando presente, também abre o Python; ele não substitui a instalação desses componentes.
-
-Para compilar:
+Para abrir:
 
 ```powershell
-python -m PyInstaller --noconfirm --distpath ".release\onefile-dist" --workpath ".release\build" easy-pkg-extractor.spec
+python easy-pkg-extractor.py
 ```
 
-O resultado fica em `.release\onefile-dist\easy-pkg-extractor.exe`. Para distribuir, coloque somente esse EXE dentro de `easy-pkg-extractor-windows-x64.zip`.
+`pycryptodome` é necessário para extrair. `zlib-ng` é opcional ao executar o Python, mas acelera a descompactação. O indicador de CPU funciona com `psutil`, se disponível, ou com a alternativa do Windows. Nesse modo, a busca automática parte da pasta do arquivo `.py` e também inclui as subpastas.
 
-A configuração de compilação preserva os recursos de janelas e idiomas e inclui os componentes AES usados pelo extrator. Ela usa a alternativa `ctypes` da biblioteca de criptografia e evita a compressão da camada externa do EXE para reduzir o tempo de abertura. Por isso, o EXE é maior que o ZIP. A extração continua usando o mesmo código Python, com alternativas para recursos de aceleração indisponíveis.
-
-Para rodar os quatro testes de abertura disponíveis nesta revisão:
-
-```powershell
-python -B -m unittest discover -v
-```
-
-Eles conferem AES, XTS, janela, busca, idiomas e erros do executável com dados temporários. O teste do EXE dá preferência à cópia em `.release\onefile-dist`. Confira também se algum teste foi ignorado por falta de um componente; esses testes não comprovam todos os formatos de PKG nem todos os computadores.
+Os arquivos públicos são este README, `easy-pkg-extractor.py` e as imagens em `docs/images`. O programa pronto fica somente nos lançamentos, como `easy-pkg-extractor.exe`.
 
 </details>
 
